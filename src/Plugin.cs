@@ -43,7 +43,7 @@ namespace PlaytimeRclone
                 vault = new Vault(Root);
                 savedConflicts=ReadSaveConflicts();
                 blobs = new BlobStore(Path.Combine(Root,"blobs"));
-                blobs.CancelRequested=()=>closing||transferCancelled;
+                blobs.CancelRequested=()=>closing||TransferStopped;
                 devices = new DeviceDirectory(Root);
                 try{InitializeSetup();}catch(Exception ex){setup=null;setupStatus="Add-on synchronization is unavailable: "+ex.Message;logger.Error(ex,"Optional add-on state could not be loaded; game sync remains available.");}
                 devicePreferences = File.Exists(Path.Combine(Root,"device-settings.json")) ? JsonConvert.DeserializeObject<DevicePreferences>(File.ReadAllText(Path.Combine(Root,"device-settings.json"))) : new DevicePreferences();
@@ -69,7 +69,7 @@ namespace PlaytimeRclone
             if (!String.IsNullOrWhiteSpace(next.RemoteFolder)) next.Validate();
             if (!String.IsNullOrWhiteSpace(next.RemoteFolder)) vault.Pin(next.RemoteFolder);
             Atomic.Write(Path.Combine(Root, "rclone-settings.json"), JsonConvert.SerializeObject(next, Formatting.Indented));
-            config = next; RefreshOverviewPage();QueueSync();
+            config = next; RefreshOverviewPage();if(onboarding!=null&&onboarding.SetupComplete)QueueSync();
         }
         public override ISettings GetSettings(bool firstRunSettings)
         {
@@ -238,7 +238,8 @@ namespace PlaytimeRclone
             if (repository.Snapshot().Active.Count > 0)
                 PlayniteApi.Notifications.Add(new NotificationMessage("PlaytimeRclone.Pending", "Unfinished playtime sessions need review. Use the game's Playnite Link recovery menu.", NotificationType.Error));
             timer = new Timer(_ => CheckIdleSync(), null, Timeout.Infinite, Timeout.Infinite);
-            QueueSync();
+            if(!onboarding.SetupComplete)PlayniteApi.MainView.UIDispatcher.BeginInvoke(new Action(()=>Guard(ShowWalkthrough)));
+            else {status=onboarding.SyncPaused?"Sync paused. Choose Resume sync when you are ready.":status;QueueSync();}
         }
         public override void OnGameStarted(OnGameStartedEventArgs args)
         {
@@ -317,6 +318,7 @@ namespace PlaytimeRclone
         {
             return new[] {
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Personal cloud account & settings", Action = _ => Guard(PersonalAccount) },
+                new MainMenuItem { MenuSection = "@Playnite Link", Description = "Setup walkthrough", Action = _ => Guard(ShowWalkthrough) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Sync personal vault now", Action = _ => Guard(() => RequestSync(true)) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Add-ons", Action = _ => Guard(ManageSetup) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Connected devices", Action = _ => Guard(ManageDevices) },

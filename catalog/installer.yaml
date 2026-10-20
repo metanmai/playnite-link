@@ -1,5 +1,12 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
+  - Version: 0.5.3
+    RequiredApiVersion: 6.18.0
+    ReleaseDate: 2026-10-20
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.3/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_3.pext
+    Changelog:
+      - Add a resumable first-run setup walkthrough.
+      - Pause cancelled transfers and safely resume without restarting queued work.
   - Version: 0.5.2
     RequiredApiVersion: 6.18.0
     ReleaseDate: 2026-10-20

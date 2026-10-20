@@ -1,0 +1,1 @@
+using System;using System.IO;using System.Threading;class TransferFixture{static int Main(string[] args){if(args.Length>0&&args[0]=="listremotes"){Console.WriteLine("vault:");return 0;}File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"transfer-started.txt"),"started");Thread.Sleep(60000);return 1;}}

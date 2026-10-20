@@ -3,7 +3,8 @@ param(
     [string]$PlaynitePath = "$env:LOCALAPPDATA/Playnite",
     [switch]$KeepOpen,
     [switch]$SkipBuild,
-    [switch]$LockProbe
+    [switch]$LockProbe,
+    [switch]$OnboardingProbe
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
@@ -34,7 +35,7 @@ $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
 $references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
 Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probePath
-$probeSource=if($LockProbe){'LockHostProbe.cs'}else{'PersonalHostProbe.cs'}
+$probeSource=if($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}else{'PersonalHostProbe.cs'}
 & $compilerPath /nologo /target:library "/out:$probePath/HostProbe.dll" @references (Join-Path $PSScriptRoot $probeSource)
 if ($LASTEXITCODE -ne 0) { throw 'Host probe compile failed' }
 & $compilerPath /nologo /target:winexe "/out:$profilePath/FixtureGame.exe" (Join-Path $PSScriptRoot 'FixtureGame.cs')
@@ -58,6 +59,14 @@ foreach($area in @('devices','ledger','activity','revisions','setup')){New-Item 
 $rcloneConfig = Join-Path $profilePath 'fixture-rclone.conf'
 "[vault]`ntype = alias`nremote = $profilePath/Cloud`n" | Set-Content $rcloneConfig
 @{ RcloneExe=$rcloneExe;ConfigFile=$rcloneConfig;RemoteFolder='vault:personal' } | ConvertTo-Json | Set-Content (Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767/rclone-settings.json')
+if($OnboardingProbe){
+ $extensionData=Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767'
+ @{AutomaticGames=$true;SetupComplete=$false;SetupStep=0;SyncPaused=$false} | ConvertTo-Json | Set-Content (Join-Path $extensionData 'onboarding.json')
+ & $compilerPath /nologo /target:exe "/out:$profilePath/fixture-rclone.exe" (Join-Path $PSScriptRoot 'TransferFixture.cs')
+ if($LASTEXITCODE -ne 0){throw 'Transfer fixture compilation failed'}
+ [IO.File]::WriteAllText((Join-Path $profilePath 'real-rclone-path.txt'),$rcloneExe)
+ @{ RcloneExe=(Join-Path $profilePath 'fixture-rclone.exe');ConfigFile=$rcloneConfig;RemoteFolder='vault:personal' } | ConvertTo-Json | Set-Content (Join-Path $extensionData 'rclone-settings.json')
+}
 $exeName = if ($Mode -eq 'Desktop') { 'Playnite.DesktopApp.exe' } else { 'Playnite.FullscreenApp.exe' }
 $exePath = Join-Path $appPath $exeName
 $arguments = @('--masterinstance','--nolibupdate','--hidesplashscreen','--userdatadir',('"' + $profilePath + '"'))
@@ -71,7 +80,7 @@ if (!$KeepOpen -and !$testProcess.HasExited) { Start-Process $exePath -ArgumentL
 if (!(Test-Path $resultPath)) { throw "Host probe did not finish; inspect $profilePath" }
 $evidencePath = Join-Path $projectRoot 'docs/evidence'
 New-Item -ItemType Directory -Force $evidencePath | Out-Null
-$prefix=if($LockProbe){'lock-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}
+$prefix=if($OnboardingProbe){'onboarding-'+$Mode.ToLowerInvariant()}elseif($LockProbe){'lock-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}
 Copy-Item $resultPath (Join-Path $evidencePath ($prefix + '-host.json')) -Force
 Get-ChildItem $profilePath -Filter '*.png' | ForEach-Object { Copy-Item $_.FullName (Join-Path $evidencePath ($prefix + '-' + $_.Name)) -Force }
 Copy-Item (Join-Path $profilePath 'extensions.log') (Join-Path $evidencePath ($prefix + '-extensions.log')) -Force

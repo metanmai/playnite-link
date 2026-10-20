@@ -50,6 +50,7 @@ namespace PlaytimeRclone
         }
         private void Copy(string source, string destination, bool upload,string fileList=null,string[] metadata=null)
         {
+            if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");
             var args = new List<string> { "copy", source, destination, "--immutable",
                 "--retries", "3", "--low-level-retries", "4", "--retries-sleep", "10s", "--tpslimit", "4", "--tpslimit-burst", "4", "--contimeout", "10s", "--timeout", "60s", "--stats", "0", "--log-level", "ERROR" };
             if(pattern=="*.blob"){args.Add("--ignore-existing");}else args.Add("--checksum");
@@ -70,6 +71,7 @@ namespace PlaytimeRclone
                     if((cancelled!=null&&cancelled())||watch.Elapsed.TotalSeconds>limitSeconds)
                     {process.Kill();process.WaitForExit();if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");throw new IOException("Cloud transfer timed out. Local changes remain queued.");}
                 System.Threading.Tasks.Task.WaitAll(stdout, stderr);
+                if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");
                 // rclone exit 3 = directory missing, 9 = no transfer. Other errors always fail closed.
                 if (process.ExitCode != 0 && !( !upload && (process.ExitCode == 3 || process.ExitCode == 9)))
                 {

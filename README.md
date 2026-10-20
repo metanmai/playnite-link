@@ -4,16 +4,16 @@ Your saves and playtime, in your own cloud storage.
 
 An independent community extension for **Playnite 10.62+ on Windows 10/11**. There is no Playnite Link account server or central save database. Each device authorizes your storage account separately.
 
-[Download 0.5.1](https://github.com/metanmai/playnite-link/releases/latest) · [Setup guide](https://fluffy-florentine-e76038.netlify.app/playnite-link/setup.html) · [Report an issue](https://github.com/metanmai/playnite-link/issues)
+[Download latest](https://github.com/metanmai/playnite-link/releases/latest) · [Setup guide](https://fluffy-florentine-e76038.netlify.app/playnite-link/setup.html) · [Report an issue](https://github.com/metanmai/playnite-link/issues)
 
 ## Install
 
 1. Download the `.pext` file from the latest release.
 2. Open it with Playnite, approve installation, and restart Playnite.
-3. Open **Playnite menu → Playnite Link → Personal cloud account & settings**.
+3. Follow the first-run walkthrough for storage, games/save folders, optional features and first sync. Close it anytime and continue where you left off.
 4. Connect an existing authorized Rclone remote, or create a supported provider connection. Use the same vault folder on your other device.
 
-Playnite is currently holding new plugin submissions. A validated catalog contribution is prepared as a draft until submissions resume. Until it is merged, use the release download above. Once listed, installation and updates will also be available through **Add-ons → Browse → Generic**.
+Playnite is currently holding new plugin submissions. The validated catalog contribution is a draft until submissions resume. Until it is merged, use the release download above. Once listed, installation and updates will also be available through **Add-ons → Browse → Generic**.
 
 ## What it does
 
@@ -56,3 +56,5 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File ./package.ps1
 Tests and isolated host harnesses are in `tests/`. Cloud tests require your own authorized Rclone configuration and must use a dedicated synthetic vault prefix. Never run test helpers against a personal production library.
 
 Release packaging must contain no cloud configuration, tokens, passcode state, personal saves or test-companion binaries. [Privacy](https://fluffy-florentine-e76038.netlify.app/playnite-link/privacy.html) · [Third-party notices](THIRD-PARTY-NOTICES.md) · [MIT license](LICENSE).
+
+Version 0.5.3 adds persistent pause/resume and a first-run walkthrough. [Onboarding verification](docs/ONBOARDING-0.5.3.md).

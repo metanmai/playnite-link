@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.3 — 2026-10-20
+
+- Guide first-time users through storage, games/save folders, opt-ins and first sync.
+- Save walkthrough progress and defer automatic sync until setup is complete.
+- Stop queued transfers, persist pause, and expose Resume sync after cancellation.
+- Verify recovery, navigation, conflicts and fast launches in Desktop and Fullscreen Playnite.
+
+## 0.5.2 — 2026-10-20
+
+- Set author attribution to metanmai.
+
+
 ## 0.5.1 — 2026-10-20
 
 - Launch local games without waiting for a full cloud synchronization.

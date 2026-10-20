@@ -27,7 +27,7 @@ namespace PlaytimeRclone
         {
             if(setup==null||!setup.Options.Enabled)return;
             if(DateTime.UtcNow>=nextSetupCapture){setup.Capture(repository.Snapshot().Device);nextSetupCapture=DateTime.UtcNow.AddMinutes(5);}
-            var cfg=config;var remote=new RcloneTransport(cfg.RcloneExe,cfg.ConfigFile,cfg.RemoteFolder,"playnite-link-v1/setup/objects",cancelled:()=>closing||transferCancelled);
+            var cfg=config;var remote=new RcloneTransport(cfg.RcloneExe,cfg.ConfigFile,cfg.RemoteFolder,"playnite-link-v1/setup/objects",cancelled:()=>closing||TransferStopped);
             var incoming=Path.Combine(setup.DirectoryPath,"incoming");Directory.CreateDirectory(incoming);remote.Pull(incoming);setup.History.Import(incoming);setup.MergeEquivalent(repository.Snapshot().Device);
             var pending=setup.History.Read(setup.History.Objects).Where(p=>!File.Exists(Path.Combine(incoming,p.Key+".json"))).ToArray();
             if(pending.Length>0)
@@ -45,10 +45,11 @@ namespace PlaytimeRclone
             });
         }
         private RcloneTransport SetupBlobTransport()
-        {return new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||transferCancelled);}
+        {return new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||TransferStopped);}
         private void TrySyncSetup()
         {
-            try{SyncSetup();}
+            try{CheckTransfer();SyncSetup();}
+            catch(OperationCanceledException){throw;}
             catch(Exception ex){setupStatus="Add-on sync is waiting: "+ex.Message;logger.Error(ex,"Add-on synchronization deferred; game sync can continue.");}
         }
         private void ManageSetup(){OpenAccountPage("Add-ons");}

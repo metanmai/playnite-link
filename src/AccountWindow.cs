@@ -13,7 +13,7 @@ namespace PlaytimeRclone
         private TextBlock overviewStatus,overviewHeading;
         private Button overviewStop;
         private Button overviewSync;
-        private void PersonalAccount(){OpenAccountPage("Overview");}
+        private void PersonalAccount(){if(!onboarding.SetupComplete)ShowWalkthrough();else OpenAccountPage("Overview");}
         private void ManageDevices(){OpenAccountPage("Devices");}
         private void ManageSecurity(){if(EnsureAccess())OpenAccountPage("Protection");}
         private void OpenAccountPage(string section)
@@ -25,7 +25,7 @@ namespace PlaytimeRclone
             updates.Tick+=(_,e)=>{
                 if(overviewStatus!=null)overviewStatus.Text=status;
                 if(overviewHeading!=null)overviewHeading.Text=syncing!=0?"Syncing in the background":status.IndexOf("throttl",StringComparison.OrdinalIgnoreCase)>=0?"Waiting for your cloud provider":String.IsNullOrWhiteSpace(config.RemoteFolder)?"Connect your cloud":"Storage configured";
-                if(overviewSync!=null)overviewSync.IsEnabled=syncing==0;
+                if(overviewSync!=null){overviewSync.IsEnabled=syncing==0;overviewSync.Content=IsSyncPaused?"Resume sync":"Sync now";}
                 if(overviewStop!=null)overviewStop.IsEnabled=syncing!=0;
                 if(setupStatusText!=null)setupStatusText.Text=setupStatus;
                 if(activityStatusText!=null)activityStatusText.Text=activityStatus;

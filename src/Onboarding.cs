@@ -11,7 +11,7 @@ using Playnite.SDK.Models;
 
 namespace PlaytimeRclone
 {
-    public sealed class OnboardingOptions {public bool AutomaticGames=true;public bool OnlineHltb;}
+    public sealed class OnboardingOptions {public bool AutomaticGames=true;public bool OnlineHltb;public bool SetupComplete;public int SetupStep;public bool SyncPaused;}
     public sealed partial class PlaytimePlugin
     {
         private OnboardingOptions onboarding;
@@ -20,6 +20,12 @@ namespace PlaytimeRclone
             var path=Path.Combine(Root,"onboarding.json");
             onboarding=File.Exists(path)?JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(path)):new OnboardingOptions{AutomaticGames=fresh};
             if(onboarding==null)throw new InvalidDataException("Invalid onboarding preferences.");
+            if(onboarding.SetupStep<0||onboarding.SetupStep>4)onboarding.SetupStep=0;
+            // Older connected profiles keep their setup. Fresh installs always get the walkthrough.
+            var connection=Path.Combine(Root,"rclone-settings.json");
+            if(File.Exists(connection)&&(!File.Exists(path)||Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path))["SetupComplete"]==null))
+            {var previous=JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(connection));onboarding.SetupComplete=previous!=null&&!String.IsNullOrWhiteSpace(previous.RemoteFolder);}
+
         }
         private void SaveOnboarding(){Atomic.Write(Path.Combine(Root,"onboarding.json"),JsonConvert.SerializeObject(onboarding));}
         private void EnsureAutomaticLinks()
@@ -40,7 +46,8 @@ namespace PlaytimeRclone
             repository.EnrollBatch(requests);
             if(requests.Count>0)RefreshOverviewPage();
         }
-        private async void ConnectStorage()
+        private async void ConnectStorage(){try{await ConnectStorageAsync();}catch(Exception ex){NotifyError(ex);}}
+        private async Task ConnectStorageAsync()
         {
             if(!EnsureAccess())return;
             var exe=config.RcloneExe;

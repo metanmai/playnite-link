@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "mode": "Fullscreen",
+  "wizardResume": true,
+  "optionalUploadsOff": true,
+  "queuedSyncCancelled": true,
+  "noAutomaticRestart": true,
+  "pausePersisted": true,
+  "retrySucceeded": true,
+  "repeatedSyncNoDuplicateSessions": true,
+  "finishSaved": true,
+  "cancelMilliseconds": 189,
+  "uiHeartbeats": 153
+}
