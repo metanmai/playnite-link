@@ -1,0 +1,129 @@
+{
+  "targetMilliseconds": 10000,
+  "unitPassed": 201,
+  "groups": [
+    {
+      "name": "Ledger, transport and filtered metadata batch",
+      "exe": "Tests",
+      "failed": 0,
+      "passed": 55,
+      "expected": 55
+    },
+    {
+      "name": "Save conflicts, backups, preferences and OAuth",
+      "exe": "VaultTests",
+      "failed": 0,
+      "passed": 55,
+      "expected": 55
+    },
+    {
+      "name": "Streaming, devices and launch-during-staging safety",
+      "exe": "StreamingTests",
+      "failed": 0,
+      "passed": 16,
+      "expected": 16
+    },
+    {
+      "name": "Passcode persistence and throttling",
+      "exe": "SecurityTests",
+      "failed": 0,
+      "passed": 9,
+      "expected": 9
+    },
+    {
+      "name": "Application protection",
+      "exe": "ApplicationLockTests",
+      "failed": 0,
+      "passed": 15,
+      "expected": 15
+    },
+    {
+      "name": "Add-on peers, conflicts and rollback",
+      "exe": "SetupTests",
+      "failed": 0,
+      "passed": 18,
+      "expected": 18
+    },
+    {
+      "name": "GameActivity identity and duplicate protection",
+      "exe": "ActivityTests",
+      "failed": 0,
+      "passed": 18,
+      "expected": 18
+    },
+    {
+      "name": "HLTB progress and identity checks",
+      "exe": "HltbTests",
+      "failed": 0,
+      "passed": 11,
+      "expected": 11
+    },
+    {
+      "name": "Pinned runtime integrity",
+      "exe": "RuntimeTests",
+      "failed": 0,
+      "passed": 4,
+      "expected": 4
+    }
+  ],
+  "unitFailed": 0,
+  "launchRuns": [
+    {
+      "run": "launch-final-local-A",
+      "seconds": 68,
+      "evidence": "launch-final-local-A.json",
+      "metadataMs": 170,
+      "sessions": 3,
+      "launchMs": 470,
+      "passed": true
+    },
+    {
+      "run": "launch-final-local-B",
+      "seconds": 76,
+      "evidence": "launch-final-local-B.json",
+      "metadataMs": 184,
+      "sessions": 4,
+      "launchMs": 519,
+      "passed": true
+    },
+    {
+      "run": "launch-final-local-Verify",
+      "seconds": 76,
+      "evidence": "launch-final-local-Verify.json",
+      "metadataMs": 187,
+      "sessions": 4,
+      "launchMs": 0,
+      "passed": true
+    },
+    {
+      "run": "launch-final-cloud-A",
+      "seconds": 68,
+      "evidence": "launch-final-cloud-A.json",
+      "metadataMs": 4099,
+      "sessions": 3,
+      "launchMs": 571,
+      "passed": true
+    },
+    {
+      "run": "launch-final-cloud-B",
+      "seconds": 76,
+      "evidence": "launch-final-cloud-B.json",
+      "metadataMs": 4049,
+      "sessions": 4,
+      "launchMs": 464,
+      "passed": true
+    },
+    {
+      "run": "launch-final-cloud-Verify",
+      "seconds": 76,
+      "evidence": "launch-final-cloud-Verify.json",
+      "metadataMs": 3898,
+      "sessions": 4,
+      "launchMs": 0,
+      "passed": true
+    }
+  ],
+  "priorAcceptance": "ACCEPTANCE-0.5.md",
+  "allPassed": true,
+  "version": "0.5.1"
+}

@@ -1,0 +1,94 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Text;
+using Newtonsoft.Json;
+using PlaytimeRclone;
+
+internal static class VaultTests
+{
+    static int passed,failed;static string root,exe;static string game=Identity.Hash("manual:demo-adventure");static string device=Guid.NewGuid().ToString("N");
+    static string Dir(){var p=Path.Combine(root,Guid.NewGuid().ToString("N").Substring(0,12));Directory.CreateDirectory(p);return p;}
+    static SortedDictionary<string,string> Data(string value){return new SortedDictionary<string,string>(StringComparer.Ordinal){{"slot1/save.dat",Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}};}
+    static SortedDictionary<string,string> Pref(bool favorite,string notes=""){return new SortedDictionary<string,string>(StringComparer.Ordinal){{"Favorite",favorite.ToString()},{"Hidden","False"},{"Notes",notes}};}
+    static Vault New(){return new Vault(Dir());}
+    static Revision Rev(string value,params string[] parents){return new Revision{Game=game,Kind="save",Device=device,Data=Data(value),Parents=parents.ToList()};}
+    static void Equal<T>(T a,T b){if(!Object.Equals(a,b))throw new Exception("Expected "+a+", got "+b);}
+    static void True(bool value){if(!value)throw new Exception("Assertion failed");}
+    static void Throws(Action action){try{action();}catch{return;}throw new Exception("Expected rejection");}
+    static void Test(string title,Action action){try{action();passed++;Console.WriteLine("PASS "+title);}catch(Exception ex){failed++;Console.WriteLine("FAIL "+title+": "+ex);}}
+    static ReconcileResult Sync(Vault v,SortedDictionary<string,string> local,Checkpoint cp,Func<Conflict,string> choice=null,Action<SortedDictionary<string,string>> apply=null,string kind="save")
+    {return v.Reconcile(game,kind,device,local,cp,choice??(c=>{throw new Exception("Unexpected conflict");}),apply??(d=>{}));}
+    static void Copy(Vault a,Vault b){var pull=Dir();foreach(var p in Directory.GetFiles(a.Objects,"*.json"))File.Copy(p,Path.Combine(pull,Path.GetFileName(p)));b.Import(pull);}
+    static void Main(string[] args)
+    {
+        root=args[0];exe=args.Length>1?args[1]:null;Directory.CreateDirectory(root);
+        Test("first device publishes a root revision",()=>{var v=New();var cp=new Checkpoint();Sync(v,Data("a"),cp);Equal(1,v.Heads(game,"save").Count);True(cp.Revision!=null);});
+        Test("identical repeated sync creates no revision",()=>{var v=New();var cp=new Checkpoint();Sync(v,Data("a"),cp);Sync(v,Data("a"),cp);Equal(1,v.Read(v.Objects).Count);});
+        Test("second empty device restores cloud root",()=>{var v=New();var r=Rev("remote");v.Add(r);SortedDictionary<string,string> applied=null;var cp=new Checkpoint();Sync(v,new SortedDictionary<string,string>(),cp,null,d=>applied=d);Equal(r.ContentHash(),Revision.ContentHashOf(applied));});
+        Test("remote-only descendant restores automatically",()=>{var v=New();var a=Rev("a");var b=Rev("b",a.Hash());v.Add(a);v.Add(b);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};string value=null;Sync(v,a.Data,cp,null,d=>value=Revision.ContentHashOf(d));Equal(b.ContentHash(),value);Equal(b.Hash(),cp.Revision);});
+        Test("local-only edit publishes child",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};Sync(v,Data("b"),cp);Equal(a.Hash(),v.Heads(game,"save")[0].Parents.Single());});
+        Test("divergent edits invoke conflict chooser",()=>{var v=New();var a=Rev("a");var b=Rev("remote",a.Hash());v.Add(a);v.Add(b);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};bool asked=false;Sync(v,Data("local"),cp,c=>{asked=true;return "cancel";});True(asked);Equal(a.Hash(),cp.Revision);});
+        Test("cancel preserves files checkpoints and revision count",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint();bool applied=false;var outcome=Sync(v,Data("b"),cp,c=>"cancel",d=>applied=true);True(outcome.Cancelled);True(!applied);Equal(null,cp.Revision);Equal(1,v.Read(v.Objects).Count);});
+        Test("explicit local resolution preserves remote history",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint();Sync(v,Data("b"),cp,c=>"local");Equal(2,v.Read(v.Objects).Count);Equal(a.Hash(),v.Heads(game,"save").Single().Parents.Single());});
+        Test("two concurrent roots form two heads",()=>{var v=New();v.Add(Rev("a"));v.Add(Rev("b"));Equal(2,v.Heads(game,"save").Count);});
+        Test("multihead cloud choice creates resolution with both parents",()=>{var v=New();var a=Rev("a");var b=Rev("b");v.Add(a);v.Add(b);var cp=new Checkpoint();Sync(v,Data("a"),cp,c=>b.Hash());var head=v.Heads(game,"save").Single();Equal(2,head.Parents.Count);Equal(b.ContentHash(),head.ContentHash());Equal(3,v.Read(v.Objects).Count);});
+        Test("unseen concurrent branch survives an earlier resolution",()=>{var a=New();var b=New();var initial=Rev("base");a.Add(initial);b.Add(initial);var left=Rev("left",initial.Hash());var right=Rev("right",initial.Hash());a.Add(left);b.Add(right);Sync(a,Data("resolved"),new Checkpoint(),c=>"local");Copy(b,a);Equal(2,a.Heads(game,"save").Count);});
+        Test("clock skew cannot choose a winner",()=>{var v=New();var a=Rev("a");var b=Rev("b");a.CreatedUtc="2099-01-01T00:00:00Z";b.CreatedUtc="2000-01-01T00:00:00Z";v.Add(a);v.Add(b);bool asked=false;Sync(v,a.Data,new Checkpoint(),c=>{asked=true;return "cancel";});True(asked);});
+        Test("empty local folder never silently erases cloud",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};bool asked=false;Sync(v,new SortedDictionary<string,string>(),cp,c=>{asked=c.EmptyLocal;return "cancel";});True(asked);});
+        Test("empty snapshot is allowed only after explicit resolution",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};Sync(v,new SortedDictionary<string,string>(),cp,c=>"local");Equal(0,v.Heads(game,"save").Single().Data.Count);Equal(2,v.Read(v.Objects).Count);});
+        Test("unrelated remote ancestry requires review",()=>{var v=New();var a=Rev("a");var b=Rev("b");v.Add(a);v.Add(b);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};bool asked=false;Sync(v,a.Data,cp,c=>{asked=true;return "cancel";});True(asked);});
+        Test("same revision id different contents is rejected",()=>{var v=New();var a=Rev("a");var b=Rev("b");b.Id=a.Id;v.Add(a);v.Add(b);Throws(()=>v.Heads(game,"save"));});
+        Test("missing ancestors reject pull before local import",()=>{var a=New();var b=New();a.Add(Rev("a",new string('a',64)));Throws(()=>Copy(a,b));Equal(0,b.Read(b.Objects).Count);});
+        Test("cross-game ancestry is rejected",()=>{var v=New();var a=Rev("a");var b=Rev("b",a.Hash());b.Game=Identity.Hash("other-game");v.Add(a);v.Add(b);Throws(()=>v.Heads(game,"save"));});
+        Test("cross-kind ancestry is rejected",()=>{var v=New();var a=Rev("a");v.Add(a);v.Add(new Revision{Game=game,Kind="preferences",Device=device,Data=Pref(true),Parents=new List<string>{a.Hash()}});Throws(()=>v.Heads(game,"save"));});
+        Test("tampered cloud object rejected",()=>{var v=New();var a=Rev("a");v.Add(a);File.WriteAllText(Path.Combine(v.Objects,a.Hash()+".json"),a.Canonical().Replace("slot1/save.dat","slot2/save.dat"));Throws(()=>v.Read(v.Objects));});
+        Test("unknown schema properties rejected",()=>{var v=New();var a=Rev("a");File.WriteAllText(Path.Combine(v.Objects,a.Hash()+".json"),a.Canonical().Replace("\"Version\":1","\"Version\":1,\"Injected\":true"));Throws(()=>v.Read(v.Objects));});
+        foreach(var path in new[]{"../escape","/absolute","C:/root","slot/../../bad","slot\\escape","slot/file:stream","CON","NUL.txt","slot/trailing.","slot/trailing ","slot//x"})
+        {var captured=path;Test("reject unsafe save path "+path,()=>Throws(()=>SaveFiles.Validate(new SortedDictionary<string,string>{{captured,""}})));}
+        Test("case-insensitive path collisions rejected",()=>Throws(()=>SaveFiles.Validate(new SortedDictionary<string,string>{{"a",""},{"A",""}})));
+        Test("file-directory collisions rejected",()=>Throws(()=>SaveFiles.Validate(new SortedDictionary<string,string>{{"a",""},{"a/b",""}})));
+        Test("invalid base64 rejected",()=>Throws(()=>SaveFiles.Validate(new SortedDictionary<string,string>{{"a","not base64"}})));
+        Test("drive root cannot be managed as save directory",()=>Throws(()=>SaveFiles.Root(Path.GetPathRoot(root))));
+        Test("shared Documents directory cannot be managed",()=>Throws(()=>SaveFiles.Root(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments))));
+        Test("snapshot captures nested binary content",()=>{var d=Dir();Directory.CreateDirectory(Path.Combine(d,"slot"));File.WriteAllBytes(Path.Combine(d,"slot","binary.dat"),new byte[]{0,1,255,0});Equal("AAH/AA==",SaveFiles.Capture(d)["slot/binary.dat"]);});
+        Test("restore replaces entire folder and preserves local backup",()=>{var d=Dir();File.WriteAllText(Path.Combine(d,"old.dat"),"old");var old=SaveFiles.Capture(d);var backup=SaveFiles.Restore(d,Data("new"),Revision.ContentHashOf(old));True(!File.Exists(Path.Combine(d,"old.dat")));Equal("old",File.ReadAllText(Path.Combine(backup,"old.dat")));Equal("new",File.ReadAllText(Path.Combine(d,"slot1","save.dat")));});
+        Test("restore rejects local changes since capture",()=>{var d=Dir();var hash=Revision.ContentHashOf(SaveFiles.Capture(d));File.WriteAllText(Path.Combine(d,"changed"),"new");Throws(()=>SaveFiles.Restore(d,Data("x"),hash));Equal("new",File.ReadAllText(Path.Combine(d,"changed")));});
+        Test("restore validates all paths before writing",()=>{var d=Dir();File.WriteAllText(Path.Combine(d,"safe"),"yes");Throws(()=>SaveFiles.Restore(d,new SortedDictionary<string,string>{{"../escape",""}},Revision.ContentHashOf(SaveFiles.Capture(d))));Equal("yes",File.ReadAllText(Path.Combine(d,"safe")));});
+        Test("failed apply cannot advance local checkpoint",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint();Throws(()=>Sync(v,new SortedDictionary<string,string>(),cp,null,d=>{throw new IOException("disk full");}));Equal(null,cp.Revision);});
+        Test("portable preferences round trip without cloud credentials",()=>{var v=New();var cp=new Checkpoint();Sync(v,Pref(true,"hello"),cp,null,null,"preferences");var next=new Checkpoint();SortedDictionary<string,string> applied=null;Sync(v,Pref(false),next,c=>v.Heads(game,"preferences").Single().Hash(),d=>applied=d,"preferences");Equal("True",applied["Favorite"]);Equal("hello",applied["Notes"]);});
+        Test("arbitrary configuration keys cannot enter preferences",()=>{var r=new Revision{Game=game,Kind="preferences",Device=device,Data=Pref(false)};r.Data.Add("Password","secret");Throws(()=>r.Validate());});
+        Test("personal vault pin prevents switching user storage",()=>{var v=New();v.Pin("alice:Playnite");Throws(()=>v.Pin("bob:Playnite"));Equal("alice:Playnite",v.State.Remote);});
+        Test("same vault reconnect and restart preserves pin",()=>{var d=Dir();var v=new Vault(d);v.Pin("personal:Playnite/");v.Pin("personal:Playnite");Equal("personal:Playnite",new Vault(d).State.Remote);});
+        Test("damaged local state fails without resetting",()=>{var d=Dir();File.WriteAllText(Path.Combine(d,"vault-state.json"),"null");Throws(()=>new Vault(d));Equal("null",File.ReadAllText(Path.Combine(d,"vault-state.json")));});
+        Test("long revision chains validate without recursive stack growth",()=>{var v=New();string parent=null;for(int i=0;i<500;i++){var r=Rev(i.ToString(),parent==null?new string[0]:new[]{parent});v.Add(r);parent=r.Hash();}Equal(1,v.Heads(game,"save").Count);});
+        Test("Rclone account completion accepts an empty final State",()=>{int calls=0;CloudAccount.ConfigureProtocol(a=>{calls++;return "{\"State\":\"\"}";},"local.conf","personal","drive",q=>{throw new Exception("Should not ask");},(s,a)=>a());Equal(1,calls);});
+        Test("Rclone OAuth continuation passes state and selected value without a shell",()=>{int calls=0;CloudAccount.ConfigureProtocol(a=>{calls++;if(calls==1)return "{\"State\":\"choose-drive\",\"Option\":{\"Name\":\"driveid\",\"Help\":\"Choose drive\",\"Default\":\"x\",\"Required\":true}}";True(a.Contains("--continue"));Equal("choose-drive",a[a.IndexOf("--state")+1]);Equal("drive with spaces",a[a.IndexOf("--result")+1]);return "{\"State\":\"\"}";},"local.conf","personal","onedrive",q=>"drive with spaces",(s,a)=>a());Equal(2,calls);});
+        Test("cancelling cloud OAuth keeps configuration unselected",()=>Throws(()=>CloudAccount.ConfigureProtocol(a=>"{\"State\":\"pending\",\"Option\":{\"Name\":\"choice\"}}","local.conf","personal","drive",q=>null,(s,a)=>a())));
+        Test("provider secrets are marked for masked entry",()=>{bool secret=false;int calls=0;CloudAccount.ConfigureProtocol(a=>++calls==1?"{\"State\":\"pending\",\"Option\":{\"Name\":\"password\",\"IsPassword\":true}}":"{\"State\":\"\"}","local.conf","personal","drive",q=>{secret=q.Secret;return "dummy";},(s,a)=>a());True(secret);});
+        if(exe!=null)
+        {
+            Test("valid configured personal remote passes settings validation",()=>{new SyncConfig{RcloneExe=exe,RemoteFolder="vault:personal",ConfigFile=""}.Validate();});
+            Test("real Rclone two dummy personal accounts are isolated",()=>{
+                var cloudA=Dir();var cloudB=Dir();var cfg=Path.Combine(Dir(),"rclone.conf");File.WriteAllText(cfg,"");
+                var a=New();Sync(a,Data("alice"),new Checkpoint());var ta=new RcloneTransport(exe,cfg,cloudA,"playnite-link-v1/revisions/objects");var tb=new RcloneTransport(exe,cfg,cloudB,"playnite-link-v1/revisions/objects");
+                ta.Push(a.Objects);var incoming=Dir();tb.Pull(incoming);Equal(0,Directory.GetFiles(incoming,"*.json").Length);ta.Pull(incoming);Equal(1,Directory.GetFiles(incoming,"*.json").Length);
+            });
+            Test("real Rclone two devices converge with conflict backup and retry",()=>{
+                var cloud=Dir();var cfg=Path.Combine(Dir(),"rclone.conf");File.WriteAllText(cfg,"");var t=new RcloneTransport(exe,cfg,cloud,"playnite-link-v1/revisions/objects");
+                var a=New();var b=New();var cpA=new Checkpoint();var cpB=new Checkpoint();Sync(a,Data("base"),cpA);t.Push(a.Objects);
+                var incoming=Dir();t.Pull(incoming);b.Import(incoming);Sync(b,new SortedDictionary<string,string>(),cpB);
+                Sync(a,Data("desktop-offline"),cpA);Sync(b,Data("handheld-offline"),cpB);Task.WaitAll(Task.Run(()=>t.Push(a.Objects)),Task.Run(()=>t.Push(b.Objects)));
+                incoming=Dir();t.Pull(incoming);a.Import(incoming);b.Import(incoming);Equal(2,a.Heads(game,"save").Count);
+                var local=Dir();Directory.CreateDirectory(Path.Combine(local,"slot1"));File.WriteAllText(Path.Combine(local,"slot1","save.dat"),"desktop-offline");string backup=null;
+                var chosen=a.Heads(game,"save").Single(h=>h.ContentHash()==Revision.ContentHashOf(Data("handheld-offline")));
+                Sync(a,SaveFiles.Capture(local),cpA,c=>chosen.Hash(),d=>backup=SaveFiles.Restore(local,d,Revision.ContentHashOf(Data("desktop-offline"))));
+                Equal("desktop-offline",File.ReadAllText(Path.Combine(backup,"slot1","save.dat")));Equal("handheld-offline",File.ReadAllText(Path.Combine(local,"slot1","save.dat")));
+                t.Push(a.Objects);t.Push(a.Objects);incoming=Dir();t.Pull(incoming);b.Import(incoming);Sync(b,Data("handheld-offline"),cpB);Equal(1,b.Heads(game,"save").Count);Equal(cpA.Content,cpB.Content);Equal(4,b.Read(b.Objects).Count);
+            });
+        }
+        Console.WriteLine("RESULT "+passed+" passed, "+failed+" failed");Environment.ExitCode=failed==0?0:1;
+    }
+}

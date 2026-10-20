@@ -1,0 +1,33 @@
+name: Publish release assets
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        default: v0.5.1
+permissions:
+  contents: write
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Verify and upload committed distribution assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
+          package="PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_${version//./_}.pext"
+          source="PlayniteLink-${version}-source.zip"
+          for file in "$package" "$source" SHA256SUMS.txt; do
+            curl --fail --location --retry 3 "https://raw.githubusercontent.com/${GH_REPO}/${RELEASE_TAG}/distribution/${file}" --output "$file"
+          done
+          sha256sum --check SHA256SUMS.txt
+          gh release upload "$RELEASE_TAG" "$package" "$source" SHA256SUMS.txt --clobber

@@ -1,0 +1,11 @@
+AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
+Packages:
+  - Version: 0.5.1
+    RequiredApiVersion: 6.18.0
+    ReleaseDate: 2026-10-20
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.1/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_1.pext
+    Changelog:
+      - Launch games without waiting for full cloud synchronization.
+      - Batch metadata requests and defer save replacement during play.
+      - Synchronize GameActivity history and optional existing online HLTB progress.
+      - Validate two-device convergence, conflict safety and launch timing.

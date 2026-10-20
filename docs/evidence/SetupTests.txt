@@ -1,0 +1,19 @@
+PASS add-on sync defaults off on every device
+PASS capture includes add-ons and themes, excluding settings, credentials and sync extension
+PASS unchanged package metadata avoids rehashing assets
+PASS new device discovers peer packages without publishing deletions
+PASS real restart helper installs verified packages and preserves local settings
+PASS independent installs on both peers merge without a primary device
+PASS device-only theme changes neither publish nor receive changes
+PASS simultaneous edits preserve both branches for explicit resolution
+PASS shared removal backs up code and retains extension data
+PASS corrupt staged files fail verification before modifying installations
+PASS unsafe and protected package destinations are rejected
+PASS identical independent installs merge without a conflict
+PASS changes after preview abort staging without replacing local code
+PASS mid-install failure rolls back earlier packages and retry succeeds
+PASS device-only choices survive restart, including not-yet-installed packages
+PASS conflict replacement preserved the discarded branch in backup
+PASS shared removal cannot remove this device's active theme
+PASS theme folder parentheses survive capture, sync and real helper install
+RESULT 18 passed, 0 failed

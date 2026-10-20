@@ -1,0 +1,12 @@
+PASS absolute total updates once across repeated syncs
+PASS two devices converge without adding totals
+PASS stale device cannot reduce greater online progress
+PASS restart uses durable success receipt
+PASS failed upload retains intent for retry
+PASS timeout after server commit cannot double progress
+PASS missing authenticated profile never creates another entry
+PASS periodic fresh read repairs external stale overwrite
+PASS native adapter rejects a different online submission
+PASS native adapter rejects stale mapping to another HLTB game
+PASS native adapter accepts the intended submission and game
+RESULT 11 passed, 0 failed

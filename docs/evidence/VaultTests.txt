@@ -1,0 +1,56 @@
+PASS first device publishes a root revision
+PASS identical repeated sync creates no revision
+PASS second empty device restores cloud root
+PASS remote-only descendant restores automatically
+PASS local-only edit publishes child
+PASS divergent edits invoke conflict chooser
+PASS cancel preserves files checkpoints and revision count
+PASS explicit local resolution preserves remote history
+PASS two concurrent roots form two heads
+PASS multihead cloud choice creates resolution with both parents
+PASS unseen concurrent branch survives an earlier resolution
+PASS clock skew cannot choose a winner
+PASS empty local folder never silently erases cloud
+PASS empty snapshot is allowed only after explicit resolution
+PASS unrelated remote ancestry requires review
+PASS same revision id different contents is rejected
+PASS missing ancestors reject pull before local import
+PASS cross-game ancestry is rejected
+PASS cross-kind ancestry is rejected
+PASS tampered cloud object rejected
+PASS unknown schema properties rejected
+PASS reject unsafe save path ../escape
+PASS reject unsafe save path /absolute
+PASS reject unsafe save path C:/root
+PASS reject unsafe save path slot/../../bad
+PASS reject unsafe save path slot\escape
+PASS reject unsafe save path slot/file:stream
+PASS reject unsafe save path CON
+PASS reject unsafe save path NUL.txt
+PASS reject unsafe save path slot/trailing.
+PASS reject unsafe save path slot/trailing 
+PASS reject unsafe save path slot//x
+PASS case-insensitive path collisions rejected
+PASS file-directory collisions rejected
+PASS invalid base64 rejected
+PASS drive root cannot be managed as save directory
+PASS shared Documents directory cannot be managed
+PASS snapshot captures nested binary content
+PASS restore replaces entire folder and preserves local backup
+PASS restore rejects local changes since capture
+PASS restore validates all paths before writing
+PASS failed apply cannot advance local checkpoint
+PASS portable preferences round trip without cloud credentials
+PASS arbitrary configuration keys cannot enter preferences
+PASS personal vault pin prevents switching user storage
+PASS same vault reconnect and restart preserves pin
+PASS damaged local state fails without resetting
+PASS long revision chains validate without recursive stack growth
+PASS Rclone account completion accepts an empty final State
+PASS Rclone OAuth continuation passes state and selected value without a shell
+PASS cancelling cloud OAuth keeps configuration unselected
+PASS provider secrets are marked for masked entry
+PASS valid configured personal remote passes settings validation
+PASS real Rclone two dummy personal accounts are isolated
+PASS real Rclone two devices converge with conflict backup and retry
+RESULT 55 passed, 0 failed

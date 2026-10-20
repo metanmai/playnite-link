@@ -1,0 +1,77 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using Newtonsoft.Json;
+using Playnite.SDK.Models;
+
+namespace PlaytimeRclone
+{
+    public sealed class OnboardingOptions {public bool AutomaticGames=true;public bool OnlineHltb;}
+    public sealed partial class PlaytimePlugin
+    {
+        private OnboardingOptions onboarding;
+        private void InitializeOnboarding(bool fresh)
+        {
+            var path=Path.Combine(Root,"onboarding.json");
+            onboarding=File.Exists(path)?JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(path)):new OnboardingOptions{AutomaticGames=fresh};
+            if(onboarding==null)throw new InvalidDataException("Invalid onboarding preferences.");
+        }
+        private void SaveOnboarding(){Atomic.Write(Path.Combine(Root,"onboarding.json"),JsonConvert.SerializeObject(onboarding));}
+        private void EnsureAutomaticLinks()
+        {
+            if(onboarding==null||!onboarding.AutomaticGames||String.IsNullOrWhiteSpace(config.RemoteFolder))return;
+            var mappings=repository.Snapshot().Mappings;
+            var candidates=PlayniteApi.Database.Games.Where(g=>!g.IsRunning&&!g.IsLaunching&&g.PluginId!=Guid.Empty&&!String.IsNullOrWhiteSpace(g.GameId))
+                .GroupBy(g=>Source(g)).Where(g=>g.Count()==1).Select(g=>g.First()).ToArray();
+            var requests=new List<Enrollment>();
+            foreach(var game in candidates)
+            {
+                var source=Source(game);
+                if(mappings.ContainsKey(game.Id.ToString())||mappings.Values.Any(m=>m.Source==source))continue;
+                requests.Add(new Enrollment{Local=game.Id.ToString(),Source=source,Original=game.Playtime,Baseline=game.Playtime,Count=game.PlayCount});
+                // Save folders remain device-local; a missing location must never be
+                // interpreted as an empty save to restore or publish.
+            }
+            repository.EnrollBatch(requests);
+            if(requests.Count>0)RefreshOverviewPage();
+        }
+        private async void ConnectStorage()
+        {
+            if(!EnsureAccess())return;
+            var exe=config.RcloneExe;
+            if(String.IsNullOrWhiteSpace(exe)||!File.Exists(exe))
+            {
+                status="Preparing verified cloud connection tools in the background…";
+                try{exe=await Task.Run(()=>RcloneRuntime.Ensure(Root));config.RcloneExe=exe;}
+                catch(Exception ex){NotifyError(ex);return;}
+            }
+            var window=Window("Connect your storage",680,560);var panel=Page(window,"Connect your storage","Select your own cloud connection. Games from supported library providers are linked automatically; GameActivity and HowLongToBeat are detected automatically.");
+            var feedback=Label(panel,"Finding available connections…");
+            var choices=new ComboBox{MinWidth=320,Margin=new Thickness(0,12,0,12)};StyleInput(choices);panel.Children.Add(choices);
+            var connect=Button(panel,"Connect",()=>{
+                var name=choices.SelectedItem as string;if(name==null)return;
+                onboarding.AutomaticGames=true;SaveOnboarding();
+                SaveConfig(new SyncConfig{RcloneExe=exe,ConfigFile=config.ConfigFile,RemoteFolder=name+"PlayniteLink"});window.Close();
+            });connect.IsEnabled=false;
+            Button(panel,"Sign in to a new cloud account",()=>{window.Close();ConnectProvider();});
+            Label(panel,"Manual games need a shared link name. Save folders are selected locally when no reliable location is known. Extension/theme sharing remains a separate opt-in.",13,true);
+            var load=Task.Run(()=>{
+                var args="listremotes"+(String.IsNullOrWhiteSpace(config.ConfigFile)?"":" --config "+RcloneTransport.Quote(config.ConfigFile));
+                using(var process=Process.Start(new ProcessStartInfo(exe,args){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true}))
+                {
+                    var output=process.StandardOutput.ReadToEndAsync();var error=process.StandardError.ReadToEndAsync();
+                    if(!process.WaitForExit(10000)){process.Kill();throw new IOException("Storage discovery timed out.");}
+                    Task.WaitAll(output,error);if(process.ExitCode!=0)throw new IOException("Cannot read configured cloud connections.");
+                    return output.Result.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Where(n=>System.Text.RegularExpressions.Regex.IsMatch(n,"^[A-Za-z0-9][A-Za-z0-9_-]*:$")).ToArray();
+                }
+            });
+            window.Loaded+=async(_,e)=>{try{var names=await load;foreach(var name in names)choices.Items.Add(name);if(names.Length>0){choices.SelectedIndex=0;connect.IsEnabled=true;}feedback.Text=names.Length==0?"No configured connection found. Sign in below.":"Choose a connection. Your existing vault is discovered in its PlayniteLink folder.";}catch(Exception ex){feedback.Text=ex.Message;}};
+            window.ShowDialog();await Task.FromResult(0);
+        }
+    }
+}
