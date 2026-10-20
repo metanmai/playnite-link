@@ -58,3 +58,5 @@ Tests and isolated host harnesses are in `tests/`. Cloud tests require your own 
 Release packaging must contain no cloud configuration, tokens, passcode state, personal saves or test-companion binaries. [Privacy](https://fluffy-florentine-e76038.netlify.app/playnite-link/privacy.html) · [Third-party notices](THIRD-PARTY-NOTICES.md) · [MIT license](LICENSE).
 
 Version 0.5.3 adds persistent pause/resume and a first-run walkthrough. [Onboarding verification](docs/ONBOARDING-0.5.3.md).
+
+Version 0.5.4 adds Test connection, Reset connection, saved sign-in recovery and identity-verified vault reconnection. [Connection verification](docs/CONNECTIONS-0.5.4.md).

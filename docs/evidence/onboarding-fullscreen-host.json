@@ -2,6 +2,12 @@
   "passed": true,
   "mode": "Fullscreen",
   "wizardResume": true,
+  "startupCompletesWithWizardOpen": true,
+  "connectionTestNoUploads": true,
+  "resetPreservedHistory": true,
+  "savedSignInReconnected": true,
+  "booleanPromptButtons": true,
+  "promptOwnerCorrect": true,
   "optionalUploadsOff": true,
   "queuedSyncCancelled": true,
   "noAutomaticRestart": true,
@@ -9,6 +15,6 @@
   "retrySucceeded": true,
   "repeatedSyncNoDuplicateSessions": true,
   "finishSaved": true,
-  "cancelMilliseconds": 189,
-  "uiHeartbeats": 153
+  "cancelMilliseconds": 218,
+  "uiHeartbeats": 225
 }

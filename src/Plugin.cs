@@ -50,6 +50,7 @@ namespace PlaytimeRclone
                 if(devicePreferences==null)throw new InvalidDataException("Invalid local device settings.");devicePreferences.Validate();
                 config = File.Exists(path) ? JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(path)) : Defaults();
                 if (config == null) throw new InvalidDataException("Invalid Rclone settings.");
+                if(!String.IsNullOrWhiteSpace(config.RemoteFolder))status=onboarding.SyncPaused?"Sync is paused. Test your connection or continue setup when ready.":"Storage selected. Test the connection or sync when ready.";
                 logger.Info("Playnite Link initialized; decentralized personal vault.");
             }
             catch (Exception ex) { if (repository != null) repository.Dispose(); repository = null; status = "Disabled: " + ex.Message; logger.Error(ex, status); }
@@ -66,10 +67,9 @@ namespace PlaytimeRclone
         {
             if(!EnsureAccess())throw new OperationCanceledException("Cloud settings were not changed.");
             if(syncing!=0)throw new InvalidOperationException("Wait for the background sync before changing cloud settings.");
-            if (!String.IsNullOrWhiteSpace(next.RemoteFolder)) next.Validate();
-            if (!String.IsNullOrWhiteSpace(next.RemoteFolder)) vault.Pin(next.RemoteFolder);
-            Atomic.Write(Path.Combine(Root, "rclone-settings.json"), JsonConvert.SerializeObject(next, Formatting.Indented));
-            config = next; RefreshOverviewPage();if(onboarding!=null&&onboarding.SetupComplete)QueueSync();
+            ConnectionVerification proof=null;
+            if(!String.IsNullOrWhiteSpace(next.RemoteFolder)&&ConnectionChanged(next))Network("Checking the selected cloud vault…",()=>proof=VerifyConnection(next));
+            CommitConnection(next,proof);
         }
         public override ISettings GetSettings(bool firstRunSettings)
         {
@@ -238,7 +238,7 @@ namespace PlaytimeRclone
             if (repository.Snapshot().Active.Count > 0)
                 PlayniteApi.Notifications.Add(new NotificationMessage("PlaytimeRclone.Pending", "Unfinished playtime sessions need review. Use the game's Playnite Link recovery menu.", NotificationType.Error));
             timer = new Timer(_ => CheckIdleSync(), null, Timeout.Infinite, Timeout.Infinite);
-            if(!onboarding.SetupComplete)PlayniteApi.MainView.UIDispatcher.BeginInvoke(new Action(()=>Guard(ShowWalkthrough)));
+            if(!onboarding.SetupComplete)PlayniteApi.MainView.UIDispatcher.BeginInvoke(new Action(()=>Guard(()=>ShowWalkthrough(false))));
             else {status=onboarding.SyncPaused?"Sync paused. Choose Resume sync when you are ready.":status;QueueSync();}
         }
         public override void OnGameStarted(OnGameStartedEventArgs args)

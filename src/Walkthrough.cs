@@ -11,16 +11,17 @@ namespace PlaytimeRclone
     {
         private Window walkthroughWindow;
         private bool walkthroughWorking;
-        private void ShowWalkthrough()
+        private void ShowWalkthrough(){ShowWalkthrough(true);}
+        private void ShowWalkthrough(bool modal)
         {
             if(!EnsureAccess())return;
             if(walkthroughWindow!=null){walkthroughWindow.Activate();return;}
             if(syncing!=0)StopTransfer();
             var window=Window("Set up Playnite Link",760,700);walkthroughWindow=window;
             var refresh=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(250)};
-            Action render=null;TextBlock progress=null;Button run=null,stop=null,finish=null,back=null,next=null;
+            Action render=null;TextBlock progress=null;Button run=null,stop=null,finish=null,back=null,next=null,connectionSelect=null,connectionAdvanced=null,connectionReset=null,connectionTest=null,connectionCancel=null;
             render=()=>{
-                progress=null;run=null;stop=null;finish=null;back=null;next=null;
+                progress=null;run=null;stop=null;finish=null;back=null;next=null;connectionSelect=null;connectionAdvanced=null;connectionReset=null;connectionTest=null;connectionCancel=null;
                 var step=onboarding.SetupStep;
                 var names=new[]{"Welcome","Storage","Games and saves","Your choices","Ready"};
                 var panel=Page(window,names[step],"Step "+(step+1)+" of 5 · Set up once on each device. Your choices are saved as you go.");
@@ -33,11 +34,17 @@ namespace PlaytimeRclone
                 else if(step==1)
                 {
                     var storage=Card(panel,String.IsNullOrWhiteSpace(config.RemoteFolder)?"Connect your storage":"Storage selected",String.IsNullOrWhiteSpace(config.RemoteFolder)?"Sign in to your provider or reuse a connection already on this device.":config.RemoteFolder);
-                    var connect=Button(storage,"Choose storage or sign in",()=>{});
-                    connect.Click+=async(_,e)=>{connect.IsEnabled=false;walkthroughWorking=true;try{await ConnectStorageAsync();}catch(Exception ex){status=ex.Message;}finally{walkthroughWorking=false;if(walkthroughWindow==window)render();}};
-                    Button(storage,"Advanced: existing Rclone connection",()=>{Configure();render();});
+                    var connect=Button(storage,"Choose storage or sign in",()=>{});connectionSelect=connect;
+                    connect.Click+=async(_,e)=>{connect.IsEnabled=false;walkthroughWorking=true;try{await ConnectStorageAsync();}catch(OperationCanceledException){status="Connection cancelled. Your previous connection was kept.";}catch(Exception ex){status=ex.Message;}finally{walkthroughWorking=false;if(walkthroughWindow==window)render();}};
+                    connectionAdvanced=Button(storage,"Advanced: existing Rclone connection",()=>{Configure();render();});
+                    progress=Label(storage,status);
+                    var connectionActions=Actions(storage);
+                    connectionTest=Button(connectionActions,"Test connection",()=>{});var testFeedback=progress;var testButton=connectionTest;
+                    connectionTest.Click+=(_,e)=>TestConnection(testFeedback,testButton);
+                    connectionReset=Button(connectionActions,"Reset connection",()=>{ResetConnection();render();});
+                    connectionCancel=Button(connectionActions,"Cancel connection",()=>{connectionCancelled=true;status="Cancelling connection… Your previous connection is unchanged.";});
                     Label(storage,"Google Drive currently needs your own Desktop OAuth client JSON. Dropbox, OneDrive and existing authorized Rclone remotes are also supported.",14,true);
-                    if(!String.IsNullOrWhiteSpace(status)&&String.IsNullOrWhiteSpace(config.RemoteFolder))Label(storage,status,13,true);
+                    
                 }
                 else if(step==2)
                 {
@@ -105,25 +112,30 @@ namespace PlaytimeRclone
                     next=Button(footer,step==0?"Get started":"Continue",()=>{
                         if(step==1&&String.IsNullOrWhiteSpace(config.RemoteFolder)){status="Choose storage before continuing.";render();return;}
                         onboarding.SetupStep++;SaveOnboarding();render();
-                    });StyleAction(next,true);next.IsEnabled=syncing==0&&!walkthroughWorking;
+                    });StyleAction(next,true);next.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
                 }
                 else
                 {
                     finish=Button(footer,"Finish setup",()=>{onboarding.SetupComplete=true;SaveOnboarding();window.Close();if(!IsSyncPaused)QueueSync();});
-                    StyleAction(finish,true);finish.IsEnabled=syncing==0&&!walkthroughWorking;
+                    StyleAction(finish,true);finish.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
                 }
                 Button(footer,"Continue later",()=>window.Close());
             };
             refresh.Tick+=(_,e)=>{
                 if(progress!=null)progress.Text=status;
-                if(back!=null)back.IsEnabled=onboarding.SetupStep>0&&syncing==0&&!walkthroughWorking;
-                if(next!=null)next.IsEnabled=syncing==0&&!walkthroughWorking;
-                if(run!=null){run.IsEnabled=syncing==0&&!walkthroughWorking;run.Content=IsSyncPaused?"Resume sync":"Sync now";}
+                if(connectionSelect!=null)connectionSelect.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
+                if(connectionAdvanced!=null)connectionAdvanced.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
+                if(connectionTest!=null)connectionTest.IsEnabled=!walkthroughWorking&&!connectionTesting;
+                if(connectionReset!=null)connectionReset.IsEnabled=!walkthroughWorking&&!connectionTesting;
+                if(connectionCancel!=null)connectionCancel.IsEnabled=walkthroughWorking&&!connectionCancelled;
+                if(back!=null)back.IsEnabled=onboarding.SetupStep>0&&syncing==0&&!walkthroughWorking&&!connectionTesting;
+                if(next!=null)next.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
+                if(run!=null){run.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;run.Content=IsSyncPaused?"Resume sync":"Sync now";}
                 if(stop!=null)stop.IsEnabled=syncing!=0&&!transferCancelled;
-                if(finish!=null)finish.IsEnabled=syncing==0&&!walkthroughWorking;
+                if(finish!=null)finish.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
             };
-            window.Closed+=(_,e)=>{refresh.Stop();walkthroughWindow=null;};
-            render();refresh.Start();window.ShowDialog();
+            window.Closed+=(_,e)=>{connectionCancelled=true;refresh.Stop();walkthroughWindow=null;};
+            render();refresh.Start();if(modal)window.ShowDialog();else window.Show();
         }
     }
 }

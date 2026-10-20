@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.4 — 2026-10-20
+
+- Add read-only Test connection and local Reset connection controls.
+- Replace typed provider booleans with buttons and personal-Drive defaults.
+- Verify stable cloud-folder identity when reconnecting through a different local remote name.
+- Recover saved sign-ins and surface errors inline with correct dialog ownership.
+- Let Playnite finish startup while its first-run walkthrough is open.
+
+
 ## 0.5.3 — 2026-10-20
 
 - Guide first-time users through storage, games/save folders, opt-ins and first sync.

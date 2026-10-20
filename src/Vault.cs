@@ -128,6 +128,7 @@ namespace PlaytimeRclone
     {
         public int Version = 1;
         public string Remote = "";
+        public string ConnectionIdentity = "";
         public Dictionary<string, SaveLink> Links = new Dictionary<string,SaveLink>();
     }
     public sealed class Conflict
@@ -160,6 +161,17 @@ namespace PlaytimeRclone
             remote = remote.TrimEnd('/');
             if (State.Remote.Length > 0 && State.Remote != remote) throw new InvalidOperationException("This profile is pinned to another personal vault. Use a separate Playnite profile to switch accounts.");
             State.Remote = remote; Save();
+        }
+        public void PinVerified(string remote,string identity,string previousIdentity)
+        {
+            remote=remote.TrimEnd('/');
+            var expected=String.IsNullOrWhiteSpace(State.ConnectionIdentity)?previousIdentity:State.ConnectionIdentity;
+            if(State.Remote.Length>0&&(remote!=State.Remote||!String.IsNullOrEmpty(expected)||!String.IsNullOrEmpty(identity)))
+                if(String.IsNullOrEmpty(expected)||String.IsNullOrEmpty(identity)||expected!=identity)
+                    throw new InvalidOperationException("This is a different cloud vault. Select the original account and folder to keep your existing history together. Your connection was not changed.");
+            var oldRemote=State.Remote;var oldIdentity=State.ConnectionIdentity;
+            try{State.Remote=remote;State.ConnectionIdentity=identity??"";Save();}
+            catch{State.Remote=oldRemote;State.ConnectionIdentity=oldIdentity;throw;}
         }
         public void Add(Revision revision)
         { revision.Validate(); Atomic.Write(Path.Combine(Objects,revision.Hash()+".json"),revision.Canonical()); }

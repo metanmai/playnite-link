@@ -1,5 +1,12 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
+  - Version: 0.5.4
+    RequiredApiVersion: 6.18.0
+    ReleaseDate: 2026-10-20
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.4/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_4.pext
+    Changelog:
+      - Test and reset cloud connections with visible feedback.
+      - Reconnect saved sign-ins safely and use buttons for provider choices.
   - Version: 0.5.3
     RequiredApiVersion: 6.18.0
     ReleaseDate: 2026-10-20

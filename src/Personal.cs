@@ -312,7 +312,7 @@ namespace PlaytimeRclone
         private Window Window(string title,int width,int height)
         {
             var window=PlayniteApi.Dialogs.CreateWindow(new WindowCreationOptions { ShowMinimizeButton=false,ShowMaximizeButton=false });
-            window.Title=title;window.MaxWidth=Math.Max(320,SystemParameters.WorkArea.Width-32);window.MaxHeight=Math.Max(300,SystemParameters.WorkArea.Height-32);window.Width=Math.Min(width,window.MaxWidth);window.Height=Math.Min(height,window.MaxHeight);window.MinWidth=Math.Min(window.Width,520);window.MinHeight=Math.Min(window.Height,360);window.Background=Canvas;window.Foreground=Ink;window.Owner=PlayniteApi.Dialogs.GetCurrentAppWindow();window.WindowStartupLocation=WindowStartupLocation.CenterOwner;return window;
+            window.Title=title;window.MaxWidth=Math.Max(320,SystemParameters.WorkArea.Width-32);window.MaxHeight=Math.Max(300,SystemParameters.WorkArea.Height-32);window.Width=Math.Min(width,window.MaxWidth);window.Height=Math.Min(height,window.MaxHeight);window.MinWidth=Math.Min(window.Width,520);window.MinHeight=Math.Min(window.Height,360);window.Background=Canvas;window.Foreground=Ink;window.Owner=walkthroughWindow??accountWindow??PlayniteApi.Dialogs.GetCurrentAppWindow();window.WindowStartupLocation=WindowStartupLocation.CenterOwner;return window;
         }
         private void SetSaveFolder(Game game,string folder)
         {
@@ -381,6 +381,9 @@ namespace PlaytimeRclone
             }
             else {var connect=Button(actions,"Set up Playnite Link",ShowWalkthrough);StyleAction(connect,true);}
             Button(actions,onboarding.SetupComplete?"Review setup":"Continue setup",ShowWalkthrough);
+            var connectionTest=Button(actions,"Test connection",()=>{});var connectionFeedback=overviewStatus;
+            connectionTest.Click+=(_,e)=>TestConnection(connectionFeedback,connectionTest);
+            Button(actions,"Reset connection",()=>{ResetConnection();RefreshOverviewPage();});
             var count=repository.Snapshot().Mappings.Count;var games=Card(panel,count+(count==1?" linked game":" linked games"),onboarding.AutomaticGames?"Library games link automatically using their provider identity.":"Only games you choose are synchronized.");
             var automatic=Toggle(games,"Automatically link library games",onboarding.AutomaticGames);
             automatic.Click+=(_,e)=>{onboarding.AutomaticGames=automatic.IsChecked==true;SaveOnboarding();if(onboarding.AutomaticGames)QueueSync();};
@@ -410,8 +413,10 @@ namespace PlaytimeRclone
             });
             Details(panel,"Advanced & privacy",advanced);
         }
-        private void ConnectProvider()
+        private async void ConnectProvider(){try{await ConnectProviderAsync();}catch(OperationCanceledException){status="Connection cancelled. Your previous connection was kept.";}catch(Exception ex){NotifyError(ex);}}
+        private async System.Threading.Tasks.Task ConnectProviderAsync()
         {
+            connectionCancelled=false;
             var exe=config.RcloneExe;if(String.IsNullOrWhiteSpace(exe)||!File.Exists(exe))exe=Ask("Choose your installed rclone.exe:",exe);if(exe==null)return;
             if(!Path.IsPathRooted(exe)||!File.Exists(exe)||!exe.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Choose an existing rclone.exe.");
             string provider=null;
@@ -423,24 +428,20 @@ namespace PlaytimeRclone
             Dictionary<string,string> initial=null;
             if(provider=="drive")
             {
-                PlayniteApi.Dialogs.ShowMessage("Google Drive requires your own Desktop OAuth client to avoid Rclone's shared quota. Select the client JSON downloaded from your Google Cloud project. This remains on your device. An already configured Rclone connection can be selected without this step.","Connect Google Drive");
+                
                 var picker=new Microsoft.Win32.OpenFileDialog{Title="Choose your Google Desktop OAuth client",Filter="Google client JSON|*.json",CheckFileExists=true};
-                if(picker.ShowDialog()!=true)return;
+                if(picker.ShowDialog(walkthroughWindow??accountWindow??PlayniteApi.Dialogs.GetCurrentAppWindow())!=true)return;
                 var document=Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(picker.FileName));var client=document["installed"];
                 if(client==null||String.IsNullOrWhiteSpace((string)client["client_id"])||String.IsNullOrWhiteSpace((string)client["client_secret"]))throw new InvalidDataException("Choose a Google Desktop app client JSON file.");
                 initial=new Dictionary<string,string>{{"client_id",(string)client["client_id"]},{"client_secret",(string)client["client_secret"]}};
             }
             var cfg=Path.Combine(Root,"personal-rclone-"+Guid.NewGuid().ToString("N").Substring(0,8)+".conf");
             var remote="personal";
-            CloudAccount.Configure(exe,cfg,remote,provider,question=> {
-                if(!question.Secret)return Ask(question.Name+"\n"+question.Help,question.Default);
-                string value=null;var dialog=Window("Cloud account — "+question.Name,650,400);var panel=new StackPanel{Margin=new Thickness(20)};
-                Text(panel,question.Help);var password=new PasswordBox{Padding=new Thickness(8)};panel.Children.Add(password);
-                Button(panel,"Continue",()=>{value=password.Password;dialog.Close();});Button(panel,"Cancel",()=>dialog.Close());dialog.Content=panel;dialog.ShowDialog();return value;
-            },Network,initial);
-            var folder="PlayniteLink";
+            status="Complete your provider sign-in in the browser. You can cancel this connection from setup.";
+            await System.Threading.Tasks.Task.Run(()=>CloudAccount.Configure(exe,cfg,remote,provider,question=>UI(()=>AskCloudQuestion(question)),(message,action)=>{status=message;action();},initial,()=>closing||connectionCancelled));
+            var folder=SelectedVaultFolder();
             onboarding.AutomaticGames=true;SaveOnboarding();
-            SaveConfig(new SyncConfig {RcloneExe=exe,ConfigFile=cfg,RemoteFolder=remote+":"+folder});
+            await SaveConnectionAsync(new SyncConfig {RcloneExe=exe,ConfigFile=cfg,RemoteFolder=remote+":"+folder});
         }
     }
 }
