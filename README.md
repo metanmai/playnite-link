@@ -13,7 +13,7 @@ An independent community extension for **Playnite 10.62+ on Windows 10/11**. The
 3. Open **Playnite menu → Playnite Link → Personal cloud account & settings**.
 4. Connect an existing authorized Rclone remote, or create a supported provider connection. Use the same vault folder on your other device.
 
-The Playnite addon-catalog submission is pending maintainer review. Until it is merged, use the release download above. Once listed, installation and updates will also be available through **Add-ons → Browse → Generic**.
+Playnite is currently holding new plugin submissions. A validated catalog contribution is prepared as a draft until submissions resume. Until it is merged, use the release download above. Once listed, installation and updates will also be available through **Add-ons → Browse → Generic**.
 
 ## What it does
 
