@@ -28,11 +28,13 @@ namespace PlaytimeRclone
         private readonly HashSet<string> live = new HashSet<string>();
         private string status = "Not configured. Sessions are stored locally after game enrollment.";
         private CloudSettings settings;
-        private string Root { get { return GetPluginUserDataPath(); } }
+        private string syncRoot;
+        private string BaseRoot {get{return GetPluginUserDataPath();}}
+        private string Root { get { return syncRoot??(syncRoot=VaultProfiles.Resolve(BaseRoot)); } }
         public PlaytimePlugin(IPlayniteAPI api) : base(api)
         {
             Properties = new GenericPluginProperties { HasSettings = true };
-            try{security=new LocalSecurity(Root);}catch(Exception ex){protectionError=ex.Message;logger.Error(ex,"Playnite protection could not be loaded; app remains locked.");}
+            try{security=new LocalSecurity(BaseRoot);}catch(Exception ex){protectionError=ex.Message;logger.Error(ex,"Playnite protection could not be loaded; app remains locked.");}
             InitializeApplicationProtection();
             try
             {
@@ -46,9 +48,9 @@ namespace PlaytimeRclone
                 blobs.CancelRequested=()=>closing||TransferStopped;
                 devices = new DeviceDirectory(Root);
                 try{InitializeSetup();}catch(Exception ex){setup=null;setupStatus="Add-on synchronization is unavailable: "+ex.Message;logger.Error(ex,"Optional add-on state could not be loaded; game sync remains available.");}
-                devicePreferences = File.Exists(Path.Combine(Root,"device-settings.json")) ? JsonConvert.DeserializeObject<DevicePreferences>(File.ReadAllText(Path.Combine(Root,"device-settings.json"))) : new DevicePreferences();
+                devicePreferences = File.Exists(Path.Combine(Root,"device-settings.json")) ? JsonSafety.Deserialize<DevicePreferences>(File.ReadAllText(Path.Combine(Root,"device-settings.json"))) : new DevicePreferences();
                 if(devicePreferences==null)throw new InvalidDataException("Invalid local device settings.");devicePreferences.Validate();
-                config = File.Exists(path) ? JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(path)) : Defaults();
+                config = File.Exists(path) ? JsonSafety.Deserialize<SyncConfig>(File.ReadAllText(path)) : Defaults();
                 if (config == null) throw new InvalidDataException("Invalid Rclone settings.");
                 if(!String.IsNullOrWhiteSpace(config.RemoteFolder))status=onboarding.SyncPaused?"Sync is paused. Test your connection or continue setup when ready.":"Storage selected. Test the connection or sync when ready.";
                 logger.Info("Playnite Link initialized; decentralized personal vault.");
@@ -90,7 +92,8 @@ namespace PlaytimeRclone
         }
         private void NotifyError(Exception ex)
         {
-            status = ex.Message; logger.Error(ex, "Playnite Link sync/tracking error");
+            if(ex is CloudTransferException){ReportStatus(ex.Message,SyncDisplayState.Waiting,"Waiting for cloud");logger.Warn("Cloud retry pending: "+ex.Message);return;}
+            ReportStatus(ex.Message,SyncDisplayState.Failed,"Needs attention"); logger.Error(ex, "Playnite Link sync/tracking error");
             PlayniteApi.Notifications.Add(new NotificationMessage("PlaytimeRclone.Error", status, NotificationType.Error));
         }
         private string Ask(string text, string value)
@@ -122,8 +125,7 @@ namespace PlaytimeRclone
         }
         private void LiveStatus(Panel panel)
         {
-            var label=Text(panel,status);var updates=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(500)};
-            updates.Tick+=(_,e)=>label.Text=status;label.Loaded+=(_,e)=>updates.Start();label.Unloaded+=(_,e)=>updates.Stop();
+            SyncStatusView(panel);
         }
         private Button Button(Panel panel, string title, Action action)
         {
@@ -133,85 +135,64 @@ namespace PlaytimeRclone
         private void ManageGames()
         {
             var window=Window("Playnite Link — manage games",680,620);
-            var panel=Page(window,"Manage games","Choose a game to manage its saves, playtime and preferences.");
+            var panel=Page(window,"Manage games","Link a game once. Its progress syncs automatically.");
             var search=EntryField(panel,"Find a game","");
             var games=PlayniteApi.Database.Games.OrderBy(g=>g.Name).ToArray();
             var list=new ListBox{ItemsSource=games,DisplayMemberPath="Name",Height=300};
             StyleInput(list);panel.Children.Add(list);
             search.TextChanged+=(_,e)=>list.ItemsSource=games.Where(g=>(g.Name??"").IndexOf(search.Text,StringComparison.CurrentCultureIgnoreCase)>=0).ToArray();
             Action open=()=>{var game=list.SelectedItem as Game;if(game==null)return;window.Close();Manage(game);};
-            Button(panel,"Manage sync",open);Button(panel,"Close",()=>window.Close());
+            Button(panel,"Open game",open);Button(panel,"Close",()=>window.Close());
             list.MouseDoubleClick+=(_,e)=>open();
             window.ShowDialog();
         }
         private void Manage(Game game)
         {
-            var window = Window("Manage sync — "+game.Name,700,610);
-            var panel = new StackPanel { Margin = new Thickness(22) };
-            Action refresh=null;refresh = () => {
-                panel.Children.Clear();
-                Text(panel, "Your linked games sync automatically. Manage playtime here; use Save sync & preferences to choose save folders.");
-                var snapshot = repository.Snapshot(); Mapping map;
-                if (snapshot.Mappings.TryGetValue(game.Id.ToString(), out map))
-                {
-                    Button(panel,"Save sync & preferences",()=>{window.Close();ManageSaves(game);});
-                    Button(panel,"Session history",()=>ShowSessionHistory(game));
-                    Text(panel, "Linked identity: " + map.Source + "\nMerged playtime: " + new Ledger(snapshot.Entries).Total(map.Key) + " seconds\nOriginal local playtime at enrollment: " + map.Original + " seconds");
-                    var rows = snapshot.Entries.Where(x => x.Game == map.Key).OrderByDescending(x => x.EndedUtc)
-                        .Select(x => x.Kind + "    " + x.Seconds + " seconds    " + x.EndedUtc).ToArray();
-                    panel.Children.Add(new ListBox { ItemsSource = rows, Height = 150,Background=Surface,Foreground=Ink,BorderBrush=Line });
-                    Button(panel, "Sync now", QueueSync);
-                    Button(panel, "Recover unfinished session", () => Recover(game));
-                    Button(panel, "Resolve local edit using ledger", () => Resolve(game));
-                    Button(panel, "Remove this game from playtime sync", () => {
-                        if (game.IsRunning || game.IsLaunching) throw new InvalidOperationException("Stop the game first.");
-                        if (PlayniteApi.Dialogs.ShowMessage("Stop tracking this local entry? The shared history and displayed playtime are retained. Re-adding requires reviewing the history baseline again.", "Playnite Link", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
-                        { repository.Unenroll(game.Id.ToString()); refresh(); }
-                    });
-                }
-                else
-                {
-                    Text(panel, "This game is not added. Add it on the first device, then link its manually added copy on the other device with the same shared key. For Dispatch, use manual:dispatch.");
-                    Button(panel, "Add / link this game", () => { Enroll(game);refresh(); });
-                }
-                LiveStatus(panel);
-                Button(panel, "Configure cloud storage", Configure);
-                Button(panel, "Close",()=>window.Close());
-            };
-            refresh(); window.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }; window.ShowDialog();
+            if(!repository.Snapshot().Mappings.ContainsKey(game.Id.ToString())){Enroll(game);return;}
+            var window=Window("Playnite Link — "+game.Name,700,640);
+            var panel=Page(window,game.Name,"");
+            var snapshot=repository.Snapshot();var map=snapshot.Mappings[game.Id.ToString()];var link=Link(map.Key);
+            var summary=Card(panel,"Linked to your cloud",GameLabel(map.Key,game.Name));
+            Label(summary,"Playtime and sessions included.",14,true);
+            var saves=Card(panel,"Save files",String.IsNullOrWhiteSpace(link.Folder)?"Choose a save folder to include saves.":"");
+            var folderText=Label(saves,String.IsNullOrWhiteSpace(link.Folder)?"Save files aren't included yet.":link.Folder,13,true);
+            var choose=Button(saves,String.IsNullOrWhiteSpace(link.Folder)?"Include save files…":"View save folder",()=>{});
+            choose.Click+=(_,e)=>Guard(()=>{if(!String.IsNullOrWhiteSpace(link.Folder)){System.Diagnostics.Process.Start(link.Folder);return;}var folder=PlayniteApi.Dialogs.SelectFolder();if(String.IsNullOrWhiteSpace(folder))return;SetSaveFolder(game,folder);if(!String.IsNullOrWhiteSpace(link.Folder)){folderText.Text=link.Folder;choose.Content="View save folder";QueueSync();}});
+            if(CachedSaveConflict(game,map))savedConflicts.Add(map.Key);
+            var resolve=Button(saves,"Choose saves…",()=>RequestSync(true));
+            Action updateChoice=()=>{resolve.Visibility=savedConflicts.Contains(map.Key)?Visibility.Visible:Visibility.Collapsed;resolve.IsEnabled=syncing==0;};
+            var choiceTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(500)};choiceTimer.Tick+=(_,e)=>updateChoice();window.Closed+=(_,e)=>choiceTimer.Stop();updateChoice();choiceTimer.Start();
+            LiveStatus(panel);
+            if(IsSyncPaused)Button(panel,"Resume syncing",()=>RequestSync(true));
+            var more=new StackPanel();
+            Button(more,"Session history",()=>ShowSessionHistory(game));
+            Button(more,"Save history",()=>ShowHistory(game,map.Key));
+            Button(more,"Check for changes",()=>RequestSync(true));
+            var repairs=new StackPanel();
+            Label(repairs,"Use these only when history needs repair. Your cloud history is preserved.",13,true);
+            Button(repairs,"Review an interrupted session",()=>Recover(game));
+            Button(repairs,"Restore playtime from cloud history",()=>Resolve(game));
+            Label(repairs,"Cloud identity: "+map.Source+"\nOriginal playtime on this device: "+map.Original+" seconds",12,true);
+            Details(more,"Troubleshooting",repairs);
+            Button(more,"Unlink this game",()=>{if(game.IsRunning||game.IsLaunching)throw new InvalidOperationException("Stop the game first.");if(PlayniteApi.Dialogs.ShowMessage("Stop syncing this game on this device? Your cloud history, local saves and displayed playtime will be kept.","Playnite Link",MessageBoxButton.YesNo)==MessageBoxResult.Yes){repository.Unenroll(game.Id.ToString());window.Close();QueueSync();}});
+            Details(panel,"History and options",more);
+            Button(Footer(window),"Done",()=>window.Close());window.ShowDialog();
         }
         private string Source(Game game)
         {
             return Identity.Provider(game.PluginId, game.GameId);
-        }
-        private void Enroll(Game game)
-        {
-            if(syncing!=0)throw new InvalidOperationException("Wait for the background sync before linking a game.");
-            if (game.IsRunning || game.IsLaunching) throw new InvalidOperationException("Stop the game before enrollment.");
-            string suggested;
-            try { suggested = Source(game); } catch { suggested = ""; }
-            var source = Ask("Choose a shared link name for " + game.Name + ", such as dispatch. Enter the same link name on both devices. Only this game is added; matching game titles are never linked automatically.", suggested);
-            if (source == null) return;
-            if (source.StartsWith("manual:", StringComparison.Ordinal)) source = Identity.Manual(source.Substring(7));
-            else if (!source.StartsWith("provider:", StringComparison.Ordinal)) source = Identity.Manual(source);
-            else if (source != Source(game)) throw new ArgumentException("Keep the exact provider identity or enter a shared link name.");
-            var baseline = Ask("Enter the SHARED pre-extension history in whole seconds. This is a reviewed history baseline, not a new session. Baselines from devices use MAX, never SUM. Exclude sessions already captured by this extension on either device. For disjoint old histories, enter their reviewed combined total on one device. Current local seconds: " + game.Playtime, game.Playtime.ToString());
-            if (baseline == null) return;
-            ulong seconds;
-            if (!UInt64.TryParse(baseline, out seconds)) throw new ArgumentException("Use whole nonnegative seconds.");
-            repository.Enroll(game.Id.ToString(), source, game.Playtime, seconds,game.PlayCount);
-            status = "Enrolled " + game.Name + ". Original playtime is retained in local state.json. Sync pending.";
-            QueueSync();
         }
         private void CheckIdentity(Game game, Mapping map)
         {
             if (!map.Source.StartsWith("manual:", StringComparison.Ordinal) && Source(game) != map.Source)
                 throw new InvalidOperationException("Provider identity changed for " + game.Name + ". Review the mapping before continuing.");
         }
-        private void Project()
+        private int projectionFailures;
+        private void Project() { if(closing||repository==null)return;ProjectMappings(repository.Snapshot().Mappings); }
+        private void ProjectMappings(IEnumerable<KeyValuePair<string,Mapping>> mappings)
         {
             if (closing || repository == null) return;
-            foreach (var pair in repository.Snapshot().Mappings)
+            foreach (var pair in mappings)
             {
                 var game = PlayniteApi.Database.Games.Get(new Guid(pair.Key));
                 if (game == null || game.IsRunning || game.IsLaunching) continue;
@@ -227,14 +208,20 @@ namespace PlaytimeRclone
                     if(oldTime!=game.Playtime||oldCount!=game.PlayCount||oldDate!=game.LastActivity)PlayniteApi.Database.Games.Update(game);
                     RefreshActivityDisplays(game);
                 }
-                catch (Exception ex) { NotifyError(ex); }
+                catch (Exception ex) { projectionFailures++; NotifyError(ex); }
             }
+        }
+        private async System.Threading.Tasks.Task ProjectAsync()
+        {
+            var mappings=UI(()=>repository.Snapshot().Mappings.ToArray());projectionFailures=0;
+            for(var i=0;i<mappings.Length;i+=4){CheckTransfer();var batch=mappings.Skip(i).Take(4).ToArray();ReportStatus("Updating playtime and session displays. Your existing records are preserved.",SyncDisplayState.Working,"Updating your library",Math.Min(i+4,mappings.Length),mappings.Length);UI(()=>ProjectMappings(batch));await System.Threading.Tasks.Task.Delay(1);}
         }
         private void QueueSync() { QueuePersonalSync(); }
         public override void OnApplicationStarted(OnApplicationStartedEventArgs args)
         {
             if(applicationLock!=null)applicationLock.Enforce();
             if (repository == null) return;
+            if(setup!=null&&setup.RecoveryRequired)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.SetupRecovery","An interrupted add-on installation needs recovery. Open Playnite Link → Add-ons → Recover interrupted installation and restart.",NotificationType.Error));
             if (repository.Snapshot().Active.Count > 0)
                 PlayniteApi.Notifications.Add(new NotificationMessage("PlaytimeRclone.Pending", "Unfinished playtime sessions need review. Use the game's Playnite Link recovery menu.", NotificationType.Error));
             timer = new Timer(_ => CheckIdleSync(), null, Timeout.Infinite, Timeout.Infinite);
@@ -267,6 +254,8 @@ namespace PlaytimeRclone
             if(repository.Snapshot().Active.ContainsKey(args.Game.Id.ToString()))
             {args.CancelStartup=true;NotifyError(new InvalidOperationException("Recover the unfinished session before launching again."));return;}
             if(restoringSaves.Contains(args.Game.Id)){args.CancelStartup=true;LaunchAfterRestore(args.Game);return;}
+            try{SaveLink saveLink;if(vault.State.Links.TryGetValue(mapping.Key,out saveLink)&&!String.IsNullOrWhiteSpace(saveLink.Folder))BlobStore.RecoverRestore(saveLink.Folder);}
+            catch(Exception ex){args.CancelStartup=true;NotifyError(ex);return;}
             if(!permittedLaunches.Remove(args.Game.Id)&&CachedSaveConflict(args.Game,mapping)){args.CancelStartup=true;LaunchAfterSync(args.Game);return;}
             launchReservations.Add(args.Game.Id);ReleaseLaunchReservation(args.Game.Id);
             // Launch local saves immediately. Cloud discovery and uploads run in
@@ -329,14 +318,11 @@ namespace PlaytimeRclone
         }
         public override IEnumerable<GameMenuItem> GetGameMenuItems(GetGameMenuItemsArgs args)
         {
-            if (args.Games == null || args.Games.Count != 1) return new GameMenuItem[0];
+            if (repository == null || args.Games == null || args.Games.Count != 1) return new GameMenuItem[0];
             var game = args.Games[0];
+            var linked=repository.Snapshot().Mappings.ContainsKey(game.Id.ToString());
             return new[] {
-                new GameMenuItem { MenuSection = "Playnite Link", Description = "Manage save sync & preferences", Action = _ => Guard(() => ManageSaves(game)) },
-                new GameMenuItem { MenuSection = "Playnite Link", Description = "Manage sync", Action = _ => Guard(() => Manage(game)) },
-                new GameMenuItem { MenuSection = "Playnite Link", Description = "Enable and migrate playtime", Action = _ => Guard(() => Enroll(game)) },
-                new GameMenuItem { MenuSection = "Playnite Link", Description = "Recover unfinished session", Action = _ => Guard(() => Recover(game)) },
-                new GameMenuItem { MenuSection = "Playnite Link", Description = "Resolve local edit using ledger", Action = _ => Guard(() => Resolve(game)) }
+                new GameMenuItem { MenuSection = "Playnite Link", Description = linked?"Cloud sync…":"Link game…", Action = _ => Guard(() => Manage(game)) }
             };
         }
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)

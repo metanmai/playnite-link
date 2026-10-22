@@ -1,0 +1,7 @@
+# Playnite Link 0.5.6: intentional vault switching
+
+Storage setup and Overview provide Switch vault / start fresh. The confirmation explains that OAuth client JSON can be reused, Google account choice controls the Drive account, and the next vault receives a separate local history. Existing cloud data, local saves, Playnite library, installed add-ons and the app-wide passcode are retained. Fresh profiles start paused with no selected games or save folders. Saved local vault profiles remain selectable. A restart is required before reconnecting; queued or interactive sync cannot use the old runtime after selection.
+
+Validation: 60 vault assertions, 56 ledger assertions, 18 activity assertions and 11 HLTB assertions passed. Actual isolated Desktop and Fullscreen Playnite windows tested cancel, fresh selection, retained old history, blocked sync before restart, the extension restart helper, fresh profile loading after restart, reconnection with the same saved Rclone sign-in to a different local-alias vault, repeated sync without uploading old sessions, and selecting the original local profile. These are local Rclone tests; a new Google authorization or cross-account Drive transfer was not performed for this change.
+
+Manual test client shortcuts were corrected to stable paths under the user home rather than redirected Codex application data. Duplicate launches are prevented. Normal Playnite was restored and its existing extension uninstall was preserved.

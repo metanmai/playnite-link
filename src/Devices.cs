@@ -22,7 +22,14 @@ namespace PlaytimeRclone
             if(String.IsNullOrWhiteSpace(Name)||Name.Length>80||Name.Any(c=>c<32)||IntervalSeconds<30||IntervalSeconds>86400||BandwidthKiB<0||BandwidthKiB>1048576)
                 throw new InvalidDataException("Invalid device settings: name 1–80 characters, interval 30–86400 seconds, bandwidth 0–1048576 KiB/s.");
         }
-        public DevicePreferences Clone(){return JsonConvert.DeserializeObject<DevicePreferences>(JsonConvert.SerializeObject(this));}
+        public DevicePreferences Clone(){return JsonSafety.Deserialize<DevicePreferences>(JsonConvert.SerializeObject(this));}
+        public DevicePreferences ApplyRequested(DeviceEvent request,string localDevice)
+        {
+            var next=request.Settings.Clone();next.Validate();
+            // Other devices may withdraw sharing, but cannot grant local path consent.
+            if(request.Author!=localDevice&&!SharePaths)next.SharePaths=false;
+            return next;
+        }
     }
     public sealed class DeviceGame
     {
@@ -76,7 +83,7 @@ namespace PlaytimeRclone
             foreach(var path in Directory.GetFiles(directory,"*.json"))
             {
                 if(new FileInfo(path).Length>16L*1024*1024)throw new InvalidDataException("Oversized device metadata.");
-                var item=JsonConvert.DeserializeObject<DeviceEvent>(File.ReadAllText(path),new JsonSerializerSettings{MissingMemberHandling=MissingMemberHandling.Error});
+                var item=JsonSafety.Deserialize<DeviceEvent>(File.ReadAllText(path),new JsonSerializerSettings{MissingMemberHandling=MissingMemberHandling.Error});
                 if(item==null)throw new InvalidDataException("Null device metadata.");item.Validate();
                 if(Path.GetFileNameWithoutExtension(path)!=item.Hash())throw new InvalidDataException("Device record hash mismatch.");all.Add(item.Hash(),item);
             }

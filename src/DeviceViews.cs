@@ -18,7 +18,7 @@ namespace PlaytimeRclone
             foreach(var pair in repository.Snapshot().Mappings)
             {
                 var game=PlayniteApi.Database.Games.Get(new Guid(pair.Key));if(game==null)continue;SaveLink link;vault.State.Links.TryGetValue(pair.Value.Key,out link);
-                games.Add(new DeviceGame{Key=pair.Value.Key,Name=game.Name,SaveFolder=devicePreferences.SharePaths&&link!=null?link.Folder:null,
+                games.Add(new DeviceGame{Key=pair.Value.Key,Name=GameLabel(pair.Value.Key,game.Name),SaveFolder=devicePreferences.SharePaths&&link!=null?link.Folder:null,
                     SavesEnabled=devicePreferences.SyncSaves&&link!=null&&!String.IsNullOrWhiteSpace(link.Folder)});
             }
             return games.OrderBy(g=>g.Key,StringComparer.Ordinal).ToList();
@@ -27,7 +27,7 @@ namespace PlaytimeRclone
         {
             var me=repository.Snapshot().Device;
             if(syncing==0){if(!devices.Heads(me,"profile").Any())devices.PublishProfile(me,devicePreferences,DeviceGames(),true);deviceViewCache=devices.Views().ToArray();}
-            var panel=Page(window,"Your devices","Manage how each device keeps your progress in sync.","Devices");
+            var panel=Page(window,"Your devices","","Devices");
             var toolbar=Actions(panel);Button(toolbar,"Refresh devices",()=>RefreshDevices());
             Label(panel,syncing!=0?"Sync is running. This is the last received device list.":"Last seen shows the last check-in, not live online status.",13,true);
             foreach(var item in deviceViewCache.OrderByDescending(d=>d.Id==me).ThenBy(d=>d.Name))
@@ -51,7 +51,7 @@ namespace PlaytimeRclone
                 Details(card,"Device details & removal",advanced);
             }
             if(deviceViewCache.Length==0)Card(panel,"No devices yet","Connect cloud storage from Overview, then refresh this list.");
-            Label(panel,"Changes apply at the next check-in. Removing a device stops cooperative sync; revoke its storage authorization with your provider to remove cloud access.",13,true);
+            Label(panel,"To revoke cloud access, remove the device’s authorization with your storage provider.",13,true);
         }
         private void ChangeDeviceState(DeviceView device,string state)
         {
@@ -84,6 +84,8 @@ namespace PlaytimeRclone
             var interval=EntryField(advanced,"Minimum idle check interval in seconds (30–86400)",device.Settings.IntervalSeconds.ToString());
             var bandwidth=EntryField(advanced,"Bandwidth limit in KiB/s (0 = unlimited)",device.Settings.BandwidthKiB.ToString());
             var paths=Toggle(advanced,"Share save-folder paths with my other devices",device.Settings.SharePaths);
+            paths.IsEnabled=device.Id==repository.Snapshot().Device;
+            if(!paths.IsEnabled)Label(advanced,"Enable path sharing on that device itself.",13,true);
             Label(advanced,"Paths stay private unless this device opts in. Store credentials and save paths cannot be changed remotely.",13,true);Details(panel,"Advanced settings",advanced);
             var footer=Actions(Footer(window));var save=Button(footer,"Save changes",()=> {
                 int seconds,rate;if(!Int32.TryParse(interval.Text,out seconds)||!Int32.TryParse(bandwidth.Text,out rate))throw new ArgumentException("Use whole numbers for interval and bandwidth.");
@@ -105,19 +107,34 @@ namespace PlaytimeRclone
         }
         private async void RestoreHistoryAsync(string key,Revision revision)
         {
-            try
-            {
-                await Task.Run(async()=> {
-                    await syncGate.WaitAsync();transferCancelled=false;Interlocked.Exchange(ref syncing,1);
+            try{await RestoreHistoryCoreAsync(key,revision);RequestSync(true);}
+            catch(Exception ex){UI(()=>NotifyError(ex));}
+        }
+        private Task RestoreHistoryCoreAsync(string key,Revision revision)
+        {
+            var game=UI(()=>{
+                var mapping=repository.Snapshot().Mappings.Single(p=>p.Value.Key==key);
+                var id=new Guid(mapping.Key);
+                if(GameBusy(id))throw new InvalidOperationException("Stop the game before restoring save history.");
+                return id;
+            });
+            var generation=Volatile.Read(ref transferGeneration);
+            return Task.Run(async()=> {
+                    await syncGate.WaitAsync();
+                    if(generation!=Volatile.Read(ref transferGeneration)||closing){syncGate.Release();throw new OperationCanceledException();}
+                    Volatile.Write(ref activeTransferGeneration,generation);transferCancelled=false;Interlocked.Exchange(ref syncing,1);
                     try
                     {
+                        if(UI(()=>GameBusy(game)))throw new InvalidOperationException("Stop the game before restoring save history.");
                         var link=Link(key);var local=blobs.Capture(link.Folder);var data=blobs.ImportLegacy(revision.Data);
-                        LastBackup=blobs.Restore(link.Folder,data,Revision.ContentHashOf(local));
+                        LastBackup=blobs.Restore(link.Folder,data,Revision.ContentHashOf(local),()=>UI(()=>{
+                            if(GameBusy(game))throw new IOException("The game is starting or running; history restore deferred.");
+                            restoringSaves.Add(game);
+                        }));
                         var next=new Revision{Version=2,Game=key,Kind="save",Device=repository.Snapshot().Device,Data=data,Parents=vault.Heads(key,"save").Select(h=>h.Hash()).OrderBy(h=>h,StringComparer.Ordinal).ToList()};
                         vault.Add(next);link.Save.Revision=next.Hash();link.Save.Content=next.ContentHash();vault.Save();
-                    }finally{Interlocked.Exchange(ref syncing,0);syncGate.Release();}
-                });RequestSync(true);
-            }catch(Exception ex){UI(()=>NotifyError(ex));}
+                    }finally{UI(()=>restoringSaves.Remove(game));Interlocked.Exchange(ref syncing,0);syncGate.Release();}
+                });
         }
     }
 }

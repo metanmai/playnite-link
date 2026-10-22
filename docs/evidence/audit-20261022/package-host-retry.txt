@@ -1,0 +1,42 @@
+
+tests\OnboardingHostProbe.cs(51,3): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call.
+{
+  "passed": true,
+  "mode": "Desktop",
+  "freshProfileLoadedAfterRestart": true,
+  "reusedSameSavedSignIn": true,
+  "differentVaultConnected": true,
+  "repeatedSyncNoHistoryLeak": true,
+  "originalHistoryUnchanged": true,
+  "originalProfileSelectable": true
+}
+{
+  "passed": true,
+  "mode": "Desktop",
+  "vaultSwitchCancelSafe": true,
+  "vaultSwitchHistoryRetained": true,
+  "freshVaultHasNoOldHistory": true,
+  "oauthSignInReusable": true,
+  "restartRequiredBeforeSync": true,
+  "animatedLoadingIndicator": true,
+  "elapsedTimeVisible": true,
+  "loadingStopsOnPauseAndCompletion": true,
+  "uiResponsiveDuringSync": true,
+  "wizardResume": true,
+  "startupCompletesWithWizardOpen": true,
+  "connectionTestNoUploads": true,
+  "resetPreservedHistory": true,
+  "savedSignInReconnected": true,
+  "booleanPromptButtons": true,
+  "promptOwnerCorrect": true,
+  "optionalUploadsOff": true,
+  "queuedSyncCancelled": true,
+  "noAutomaticRestart": true,
+  "pausePersisted": true,
+  "retrySucceeded": true,
+  "repeatedSyncNoDuplicateSessions": true,
+  "finishSaved": true,
+  "cancelMilliseconds": 4,
+  "uiHeartbeats": 149
+}
+Isolated lab retained at C:\Users\win11\PlayniteLinkTestLabs\probe-4064025b

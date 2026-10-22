@@ -27,6 +27,7 @@ public sealed class HostProbe:GenericPlugin
   Check(File.Exists(Path.Combine(Root,"PROBE-ONLY")),"Refuse production profile");
   subject=(PlaytimePlugin)PlayniteApi.Addons.Plugins.Single(p=>p.Id==new Guid("8ca18482-3ebe-4bf7-b229-a259b2094767"));
   var data=Path.Combine(PlayniteApi.Paths.ExtensionsDataPath,"8ca18482-3ebe-4bf7-b229-a259b2094767");
+  if(File.Exists(Path.Combine(data,"active-vault-profile.json"))){await VerifyRestart(data);return;}
   var gameId=new Guid("f3d3b83a-fc3f-40ec-87c5-24094bdd81d9");if(PlayniteApi.Database.Games.Get(gameId)==null)PlayniteApi.Database.Games.Add(new Game{Id=gameId,Name="Onboarding test adventure",Playtime=100});
   heartbeat=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(20)};heartbeat.Tick+=(_,e)=>ticks++;heartbeat.Start();
   await Until(()=>Wizard()!=null);await Until(()=>File.ReadAllText(Path.Combine(Root,"playnite.log")).Contains("Application "+PlayniteApi.ApplicationInfo.ApplicationVersion+" started"));var w=Wizard();Capture("walkthrough-welcome",w);
@@ -53,22 +54,52 @@ public sealed class HostProbe:GenericPlugin
   Check(!Elements<CheckBox>(w).Single(c=>c.Content is TextBlock&&((TextBlock)c.Content).Text=="Update my online HowLongToBeat progress").IsChecked.Value,"HLTB uploads opted in silently");
   Click(w,"Continue");Capture("walkthrough-review",w);
   phase="first sync";Click(w,subject.IsSyncPaused?"Resume sync":"Start first sync");await Until(()=>File.Exists(Path.Combine(Root,"transfer-started.txt")));
+  await Until(()=>Elements<ProgressBar>(w).Any(b=>b.IsVisible&&b.IsIndeterminate));Check(Elements<TextBlock>(w).Any(t=>t.Text.Contains("elapsed")),"Elapsed time missing");var runningBar=Elements<ProgressBar>(w).Single(b=>b.IsVisible);var pulse=(Border)runningBar.Template.FindName("ActivityPulse",runningBar);Check(pulse!=null,"Visible pulse missing");var initialX=((TranslateTransform)pulse.RenderTransform).X;var busyTicks=ticks;await Task.Delay(400);Check(Math.Abs(((TranslateTransform)pulse.RenderTransform).X-initialX)>1,"Pulse did not animate");Check(ticks>busyTicks+3,"UI blocked during sync");Capture("sync-working",w);
   var queued=subject.SyncPersonalAsync(false,null);var cancelWatch=System.Diagnostics.Stopwatch.StartNew();Click(w,"Stop transfer");
   try{await queued;}catch(OperationCanceledException){}
   await Until(()=>!subject.IsSyncRunning,3000);cancelWatch.Stop();await Task.Delay(350);
   Check(subject.IsSyncPaused,"Stop did not pause automatic sync");Check(Find(w,"Resume sync").IsEnabled,"Resume unavailable");
   var options=JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(Path.Combine(data,"onboarding.json")));Check(options.SyncPaused,"Pause was not persisted");
   var stamp=File.GetLastWriteTimeUtc(Path.Combine(Root,"transfer-started.txt"));await Task.Delay(1500);await subject.SyncPersonalAsync(false,null);Check(File.GetLastWriteTimeUtc(Path.Combine(Root,"transfer-started.txt"))==stamp&&!subject.IsSyncRunning,"Cancelled sync restarted automatically");
-  Capture("walkthrough-paused",w);
+  Check(!Elements<ProgressBar>(w).Any(b=>b.IsVisible),"Loading indicator remains after pause");Check(Elements<TextBlock>(w).Any(t=>t.Text=="Paused"),"Paused outcome missing");Capture("walkthrough-paused",w);
   // Swap the deterministic stalled fixture for the installed Rclone in this isolated lab.
   File.Copy(File.ReadAllText(Path.Combine(Root,"real-rclone-path.txt")).Trim(),Path.Combine(Root,"fixture-rclone.exe"),true);
-  phase="resume sync";Click(w,"Resume sync");await Until(()=>!subject.IsSyncRunning&&Find(w,"Finish setup").IsEnabled,15000);Check(!subject.IsSyncPaused,"Resume left sync paused");
-  Check(Elements<TextBlock>(w).Any(t=>t.Text.Contains("Personal vault synced")),"Resume did not complete");
+  var progress=(SyncProgress)typeof(PlaytimePlugin).GetField("syncProgress",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).GetValue(subject);
+  phase="resume sync";Click(w,"Resume sync");await Until(()=>!subject.IsSyncRunning&&progress.Read().State==SyncDisplayState.Completed&&Find(w,"Finish setup").IsEnabled,15000);Check(!subject.IsSyncPaused,"Resume left sync paused");
+  Check(progress.Read().State==SyncDisplayState.Completed,"Resume did not complete");
   await subject.SyncPersonalAsync(true,null);await subject.SyncPersonalAsync(true,null);
+  await Task.Delay(350);Check(!Elements<ProgressBar>(w).Any(b=>b.IsVisible),"Loading indicator remains after completion");Check(Elements<TextBlock>(w).Any(t=>t.Text=="Up to date"),"Completed outcome missing");
   var state=JsonConvert.DeserializeObject<State>(File.ReadAllText(Path.Combine(data,"state.json")));Check(state.Entries.Count(e=>e.Kind=="session")==0,"Retry invented sessions");
   await Until(()=>Find(w,"Finish setup").IsEnabled,3000);Capture("walkthrough-complete",w);Click(w,"Finish setup");Check(Wizard()==null,"Finish did not close walkthrough");
   var done=JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(Path.Combine(data,"onboarding.json")));Check(done.SetupComplete&&!done.SyncPaused,"Completion not saved");
+  await Task.Delay(200);await Until(()=>!subject.IsSyncRunning,15000);
+  phase="switch vault cancel";var previousState=File.ReadAllText(Path.Combine(data,"state.json"));var previousVault=File.ReadAllText(Path.Combine(data,"vault-state.json"));
+  Action invokeSwitch=()=>subject.GetType().GetMethod("SwitchVault",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(subject,null);
+  var switchWatcher=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(80)};switchWatcher.Tick+=(_,e)=>{var d=Application.Current.Windows.OfType<Window>().FirstOrDefault(x=>x.Title=="Switch vault / start fresh"&&x.IsVisible);if(d==null)return;switchWatcher.Stop();Capture("switch-vault",d);Click(d,"Cancel");};switchWatcher.Start();invokeSwitch();Check(!File.Exists(Path.Combine(data,"active-vault-profile.json")),"Cancel selected a different vault");
+  phase="switch vault fresh";var freshWatcher=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(80)};freshWatcher.Tick+=(_,e)=>{var d=Application.Current.Windows.OfType<Window>().FirstOrDefault(x=>x.Title=="Switch vault / start fresh"&&x.IsVisible);if(d!=null){Click(d,"Start fresh vault setup");return;}d=Application.Current.Windows.OfType<Window>().FirstOrDefault(x=>x.Title=="Vault ready"&&x.IsVisible);if(d==null)return;freshWatcher.Stop();Capture("switch-vault-restart",d);Click(d,"Restart later");};freshWatcher.Start();invokeSwitch();
+  var freshRoot=VaultProfiles.Resolve(data);Check(freshRoot!=data,"Fresh profile not selected");Check(File.ReadAllText(Path.Combine(data,"state.json"))==previousState&&File.ReadAllText(Path.Combine(data,"vault-state.json"))==previousVault,"Switch changed old vault history");
+  using(var freshRepository=new Repository(freshRoot)){Check(freshRepository.Snapshot().Mappings.Count==0&&freshRepository.Snapshot().Entries.Count==0,"Old history leaked into fresh vault");}
+  var freshOptions=JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(Path.Combine(freshRoot,"onboarding.json")));Check(freshOptions.SyncPaused&&!freshOptions.SetupComplete&&!freshOptions.AutomaticGames,"Fresh onboarding is not safe");
+  var freshConnection=JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(Path.Combine(freshRoot,"rclone-settings.json")));Check(freshConnection.ConfigFile==cfg&&freshConnection.RemoteFolder=="","Reusable saved sign-in lost");
+  var newVault=new Vault(freshRoot);Check(String.IsNullOrWhiteSpace(newVault.State.Remote),"Fresh vault retained old pin");
+  bool syncBlocked=false;try{await subject.SyncPersonalAsync(true,null);}catch(InvalidOperationException){syncBlocked=true;}Check(syncBlocked,"Old runtime synced after vault switch");
   Check(ticks>30,"UI did not stay responsive");heartbeat.Stop();
-  File.WriteAllText(Path.Combine(Root,"host-result.json"),JsonConvert.SerializeObject(new{passed=true,mode=PlayniteApi.ApplicationInfo.Mode.ToString(),wizardResume=true,startupCompletesWithWizardOpen=true,connectionTestNoUploads=true,resetPreservedHistory=true,savedSignInReconnected=true,booleanPromptButtons=true,promptOwnerCorrect=true,optionalUploadsOff=true,queuedSyncCancelled=true,noAutomaticRestart=true,pausePersisted=true,retrySucceeded=true,repeatedSyncNoDuplicateSessions=true,finishSaved=true,cancelMilliseconds=cancelWatch.ElapsedMilliseconds,uiHeartbeats=ticks},Formatting.Indented));
- }catch(Exception ex){File.WriteAllText(Path.Combine(Root,"host-result.json"),JsonConvert.SerializeObject(new{passed=false,phase,error=ex.ToString()},Formatting.Indented));}}
+  File.WriteAllText(Path.Combine(Root,"host-result.json"),JsonConvert.SerializeObject(new{passed=true,mode=PlayniteApi.ApplicationInfo.Mode.ToString(),vaultSwitchCancelSafe=true,vaultSwitchHistoryRetained=true,freshVaultHasNoOldHistory=true,oauthSignInReusable=true,restartRequiredBeforeSync=true,animatedLoadingIndicator=true,elapsedTimeVisible=true,loadingStopsOnPauseAndCompletion=true,uiResponsiveDuringSync=true,wizardResume=true,startupCompletesWithWizardOpen=true,connectionTestNoUploads=true,resetPreservedHistory=true,savedSignInReconnected=true,booleanPromptButtons=true,promptOwnerCorrect=true,optionalUploadsOff=true,queuedSyncCancelled=true,noAutomaticRestart=true,pausePersisted=true,retrySucceeded=true,repeatedSyncNoDuplicateSessions=true,finishSaved=true,cancelMilliseconds=cancelWatch.ElapsedMilliseconds,uiHeartbeats=ticks},Formatting.Indented));
+  subject.GetType().GetMethod("RestartForVault",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(subject,null);
+ }catch(Exception ex){File.WriteAllText(Path.Combine(Root,File.Exists(Path.Combine(PlayniteApi.Paths.ExtensionsDataPath,"8ca18482-3ebe-4bf7-b229-a259b2094767","active-vault-profile.json"))?"vault-restart-result.json":"host-result.json"),JsonConvert.SerializeObject(new{passed=false,phase,error=ex.ToString()},Formatting.Indented));}}
+ async Task VerifyRestart(string data)
+ {
+  phase="verify fresh profile after restart";var freshRoot=VaultProfiles.Resolve(data);var actualRoot=(string)subject.GetType().GetProperty("Root",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).GetValue(subject,null);Check(actualRoot==freshRoot&&freshRoot!=data,"Restart loaded old context");
+  var oldState=File.ReadAllText(Path.Combine(data,"state.json"));var oldVault=File.ReadAllText(Path.Combine(data,"vault-state.json"));var next=JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(Path.Combine(freshRoot,"rclone-settings.json")));var signIn=next.ConfigFile;
+  foreach(var area in new[]{"devices","ledger","activity","revisions","setup"})Directory.CreateDirectory(Path.Combine(Root,"Cloud","new-vault","playnite-link-v1",area,"objects"));
+  next.RemoteFolder="second:new-vault";await (Task)subject.GetType().GetMethod("SaveConnectionAsync",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(subject,new object[]{next});
+  await subject.SyncPersonalAsync(true,null);await subject.SyncPersonalAsync(true,null);
+  var freshState=JsonConvert.DeserializeObject<State>(File.ReadAllText(Path.Combine(freshRoot,"state.json")));Check(freshState.Mappings.Count==0&&freshState.Entries.Count==0,"Old ledger leaked into new vault");Check(File.ReadAllText(Path.Combine(data,"state.json"))==oldState&&File.ReadAllText(Path.Combine(data,"vault-state.json"))==oldVault,"Reconnection changed previous vault");
+  var connection=JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(Path.Combine(freshRoot,"rclone-settings.json")));Check(connection.ConfigFile==signIn&&connection.RemoteFolder=="second:new-vault","Reused sign-in did not connect different vault");
+  Check(!Directory.GetFiles(Path.Combine(Root,"Cloud","new-vault","playnite-link-v1","ledger","objects"),"*.json").Any(),"Previous sessions uploaded to new vault");
+  await Until(()=>Wizard()!=null);Capture("fresh-vault-reconnected",Wizard());
+  VaultProfiles.Activate(data,VaultProfiles.List(data).Single(p=>p.Id=="legacy"));Check(VaultProfiles.Resolve(data)==data,"Saved original profile cannot be selected");
+  File.WriteAllText(Path.Combine(Root,"vault-restart-result.json"),JsonConvert.SerializeObject(new{passed=true,mode=PlayniteApi.ApplicationInfo.Mode.ToString(),freshProfileLoadedAfterRestart=true,reusedSameSavedSignIn=true,differentVaultConnected=true,repeatedSyncNoHistoryLeak=true,originalHistoryUnchanged=true,originalProfileSelectable=true},Formatting.Indented));
+ }
+
 }

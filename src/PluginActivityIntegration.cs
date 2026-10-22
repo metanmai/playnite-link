@@ -162,16 +162,19 @@ namespace PlaytimeRclone
             var plugin=PlayniteApi.Addons.Plugins.FirstOrDefault(p=>p.Id==new Guid("afbb1a0d-04a1-4d0c-9afa-c6e42ca855b4"));
             return plugin==null?null:new PluginActivityStore(plugin,id=>PlayniteApi.Database.Games.Get(id));
         }
-        private void CaptureActivityHistory()
+        private async System.Threading.Tasks.Task CaptureActivityHistoryAsync()
         {
-            var store=ActivityStore();if(store==null)return;
-            if(activityBridge==null)activityBridge=new ActivityBridge(Root);
-            activityReview.Clear();
-            foreach(var map in repository.Snapshot().Mappings)
+            var store=UI(()=>ActivityStore());if(store==null)return;
+            UI(()=>{if(activityBridge==null)activityBridge=new ActivityBridge(Root);activityReview.Clear();});
+            var mappings=UI(()=>repository.Snapshot().Mappings.ToArray());
+            for(var i=0;i<mappings.Length;i+=4)
             {
-                var game=PlayniteApi.Database.Games.Get(new Guid(map.Key));if(game==null||game.IsRunning||game.IsLaunching)continue;
-                try{if(!activityBridge.Capture(repository,game.Id,store))activityStatus="Waiting for GameActivity to finish a local session.";}
-                catch(Exception ex){activityReview.Add(game.Id);activityStatus=activityReview.Count+" game(s) need session-history review. "+game.Name+": "+ex.Message;NotifyError(ex);}
+                CheckTransfer();ReportStatus("Reading existing GameActivity sessions without adding duplicate plays.",SyncDisplayState.Working,"Reading session history",Math.Min(i+4,mappings.Length),mappings.Length);
+                var batch=mappings.Skip(i).Take(4).ToArray();
+                UI(()=>{foreach(var map in batch){var game=PlayniteApi.Database.Games.Get(new Guid(map.Key));if(game==null||game.IsRunning||game.IsLaunching)continue;
+                    try{if(!activityBridge.Capture(repository,game.Id,store))activityStatus="Waiting for GameActivity to finish a local session.";}
+                    catch(Exception ex){activityReview.Add(game.Id);activityStatus=activityReview.Count+" game(s) need session-history review. "+game.Name+": "+ex.Message;NotifyError(ex);}
+                }});await System.Threading.Tasks.Task.Delay(1);
             }
         }
         private bool ProjectActivity(Game game)

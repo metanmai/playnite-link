@@ -14,7 +14,7 @@ namespace PlaytimeRclone
     {
         public static string Target(SortedDictionary<string,string> data){return data["Target"];}
         public static SortedDictionary<string,string> Files(SortedDictionary<string,string> data)
-        {return JsonConvert.DeserializeObject<SortedDictionary<string,string>>(data["Files"]);}
+        {return JsonSafety.Deserialize<SortedDictionary<string,string>>(data["Files"]);}
         public static void Validate(string key,SortedDictionary<string,string> data)
         {
             if(data.Count!=6||!new[]{"Identity","Target","Name","Version","Removed","Files"}.All(data.ContainsKey))throw new InvalidDataException("Invalid add-on package metadata.");
@@ -66,6 +66,7 @@ namespace PlaytimeRclone
         public readonly string DirectoryPath;
         public SetupState State;
         public SetupOptions Options;
+        public bool RecoveryRequired{get{return File.Exists(Path.Combine(DirectoryPath,"apply-journal.json"));}}
         private readonly string profile;
         private readonly BlobStore blobs;
         public SetupProfile(string root,string profile,BlobStore blobs)
@@ -74,11 +75,11 @@ namespace PlaytimeRclone
             this.profile=Path.GetFullPath(profile);this.blobs=blobs;History=new Vault(DirectoryPath);
             State=Read<SetupState>("state.json")??new SetupState();Options=Read<SetupOptions>("options.json")??new SetupOptions();
             if(State.Checkpoints==null||State.Local==null||State.Fingerprints==null||Options.LocalOnly==null)throw new InvalidDataException("Damaged setup sync state.");
-            var receipt=Read<SetupPlan>("applied.json");
+            var receipt=RecoveryRequired?null:Read<SetupPlan>("applied.json");
             if(receipt!=null){foreach(var item in receipt.Installs)State.Checkpoints[item.Key]=item.Checkpoint;Save();File.Move(Path.Combine(DirectoryPath,"applied.json"),Path.Combine(DirectoryPath,"applied-"+Guid.NewGuid().ToString("N")+".json"));}
         }
         private T Read<T>(string name) where T:class
-        {var path=Path.Combine(DirectoryPath,name);return File.Exists(path)?JsonConvert.DeserializeObject<T>(File.ReadAllText(path)):null;}
+        {var path=Path.Combine(DirectoryPath,name);return File.Exists(path)?JsonSafety.Deserialize<T>(File.ReadAllText(path)):null;}
         public void Save(){Atomic.Write(Path.Combine(DirectoryPath,"state.json"),JsonConvert.SerializeObject(State));}
         public void SaveOptions(){Atomic.Write(Path.Combine(DirectoryPath,"options.json"),JsonConvert.SerializeObject(Options));}
         public static string ManifestField(string path,string field)
@@ -88,6 +89,7 @@ namespace PlaytimeRclone
         }
         public void Capture(string device,bool force=false)
         {
+            if(RecoveryRequired)throw new IOException("An interrupted add-on installation needs recovery. Open Add-ons and recover before sharing changes.");
             var seen=new HashSet<string>();
             foreach(var area in new[]{"Extensions","Themes/Desktop","Themes/Fullscreen"})
             {
@@ -113,6 +115,9 @@ namespace PlaytimeRclone
                     // A missing package is a removal only if its parent area exists.
                     var parent=Path.Combine(profile,Path.GetDirectoryName(pair.Value["Target"].Replace('/',Path.DirectorySeparatorChar)));
                     if(!System.IO.Directory.Exists(parent))continue;
+                    // A missing/rewritten manifest during an update is not an uninstall.
+                    var installed=Path.Combine(profile,pair.Value["Target"].Replace('/',Path.DirectorySeparatorChar));
+                    if(System.IO.Directory.Exists(installed)||File.Exists(installed))continue;
                     var removed=new SortedDictionary<string,string>(pair.Value,StringComparer.Ordinal);removed["Removed"]="True";removed["Files"]="{}";Observe(pair.Key,removed,device);State.Fingerprints.Remove(pair.Key);
                 }
             Save();
@@ -160,6 +165,7 @@ namespace PlaytimeRclone
         // Choices are component-specific; resolving one package cannot replace another.
         public SetupPlan Stage(IDictionary<string,string> choices,string device)
         {
+            if(RecoveryRequired)throw new IOException("Recover the interrupted installation before staging another update.");
             var plan=new SetupPlan{Profile=profile,DataDirectory=DirectoryPath};
             var stageRoot=Path.Combine(DirectoryPath,"staged",Guid.NewGuid().ToString("N").Substring(0,12));System.IO.Directory.CreateDirectory(stageRoot);
             foreach(var change in Changes())
@@ -170,7 +176,7 @@ namespace PlaytimeRclone
                 {
                     var settingsPath=Path.Combine(profile,data["Target"].StartsWith("Themes/Fullscreen/",StringComparison.Ordinal)?"fullscreenConfig.json":"config.json");
                     if(File.Exists(settingsPath)){
-                        var active=(string)JObject.Parse(File.ReadAllText(settingsPath))["Theme"];
+                        var active=(string)JsonSafety.Object(File.ReadAllText(settingsPath))["Theme"];
                         var identity=data["Identity"];var id=identity.Substring(identity.IndexOf(':')+1);
                         if(String.Equals(active,id,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("This theme is active on this device. Select another local theme or keep this add-on device-only before removing it.");
                     }

@@ -1,0 +1,17 @@
+{
+  "provider": "Existing Rclone Google Drive remote",
+  "remote": "personal:PlayniteLink/audit-closure-retry-af1b65f07f9a453e8f592db0ed707709/streaming-vault/run-046cd99a",
+  "largeFileBytes": 41943053,
+  "logicalSnapshotBytes": 83886106,
+  "largeFileHashVerified": true,
+  "duplicateFilesShareBlob": true,
+  "conflictResolved": true,
+  "backupPreserved": true,
+  "connectedDevices": 2,
+  "remoteDeviceConfigApplied": true,
+  "pauseResumeRemoveVerified": true,
+  "playtimeSeconds": 140,
+  "noUserSavesUsed": true,
+  "passed": true,
+  "elapsedSeconds": 214.4494389
+}

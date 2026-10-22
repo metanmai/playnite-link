@@ -1,0 +1,21 @@
+{
+  "freshBrowserEnrollmentPassed": true,
+  "packageSha256": "D78C28035ADB3BD538BBFA61F38962A2EB86DD2015893219EF6BB736E52B1721",
+  "regressionInventory": 247,
+  "saveTerminationCases": 11,
+  "helperTerminationCases": 4,
+  "largeWanPassed": true,
+  "invalidGrantRejected": true,
+  "wanMainPassed": 30,
+  "credentialRefreshPassed": true,
+  "packageVerified": true,
+  "freshBrowserEnrollmentStatus": "Completed through production CloudAccount.Configure; synthetic upload/download SHA-256 matched and 42-record existing vault metadata read passed",
+  "regressionPassed": 247,
+  "hltbLivePassed": true,
+  "wanTransferPassed": 11,
+  "releaseRecommendation": "CONDITIONALLY READY for Windows 11 / Playnite 10 with Google Drive",
+  "requestedGatesClosed": [
+    "A10 Google enrollment and WAN",
+    "A12 abrupt-termination recovery"
+  ]
+}

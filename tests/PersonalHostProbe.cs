@@ -25,7 +25,12 @@ public sealed class HostProbe : GenericPlugin
     DispatcherTimer windowWatcher;bool cancelledLaunch;bool visualStarted;
     DispatcherTimer heartbeat;int backgroundUiHeartbeats;int progressWindowsObserved;string cloudChoiceHash;
     System.Diagnostics.Stopwatch launchWatch;List<long> launchTimes=new List<long>();
-    public override void OnGameStarted(OnGameStartedEventArgs args){if(args.Game.Id==GameId&&launchWatch!=null){launchWatch.Stop();launchTimes.Add(launchWatch.ElapsedMilliseconds);}}
+    int runningHistoryRestoresRejected;bool interruptedRestoreRecovered;
+    public override void OnGameStarted(OnGameStartedEventArgs args){if(args.Game.Id==GameId&&launchWatch!=null){
+        launchWatch.Stop();launchTimes.Add(launchWatch.ElapsedMilliseconds);
+        try{typeof(PlaytimePlugin).GetMethod("RestoreHistoryCoreAsync",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(subject,new object[]{gameKey,null});Fail(new Exception("History restore accepted a running game."));}
+        catch(System.Reflection.TargetInvocationException ex){if(ex.InnerException is InvalidOperationException)runningHistoryRestoresRejected++;else Fail(ex);}
+    }}
     string Root {get{return PlayniteApi.Paths.ConfigurationPath;}}
     public HostProbe(IPlayniteAPI api):base(api){Properties=new GenericPluginProperties{HasSettings=false};}
     SortedDictionary<string,string> Data(string value){return new SortedDictionary<string,string>(StringComparer.Ordinal){{"progress.dat",Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}};}
@@ -58,7 +63,7 @@ public sealed class HostProbe : GenericPlugin
         Task.Run(async()=>{await Task.Delay(5000);PlayniteApi.MainView.UIDispatcher.BeginInvoke(new Action(()=>{
             try
             {
-                if(stops<2){launchWatch=System.Diagnostics.Stopwatch.StartNew();PlayniteApi.StartGame(GameId);return;}
+                if(stops<2){var saveRoot=Path.Combine(Root,"DemoSaves");var transaction=Guid.NewGuid().ToString("N");Atomic.Write(saveRoot+".pl-restore",transaction+"|1");Directory.Move(saveRoot,saveRoot+".pl-backup-"+transaction);launchWatch=System.Diagnostics.Stopwatch.StartNew();PlayniteApi.StartGame(GameId);interruptedRestoreRecovered=Directory.Exists(saveRoot)&&!File.Exists(saveRoot+".pl-restore");return;}
                 var extensionRoot=Path.Combine(PlayniteApi.Paths.ExtensionsDataPath,"8ca18482-3ebe-4bf7-b229-a259b2094767");
                 var state=JsonConvert.DeserializeObject<State>(File.ReadAllText(Path.Combine(extensionRoot,"state.json")));
                 var sessions=state.Entries.Where(e=>e.Kind=="session").ToList();var sessionSeconds=sessions.Aggregate(0UL,(sum,e)=>sum+e.Seconds);
@@ -67,11 +72,12 @@ public sealed class HostProbe : GenericPlugin
                 var cloudObjects=Path.Combine(Root,"Cloud","personal","playnite-link-v1","revisions","objects");
                 var allUploaded=Directory.GetFiles(subject.PersonalVault.Objects,"*.json").All(p=>File.Exists(Path.Combine(cloudObjects,Path.GetFileName(p))));
                 var backups=Directory.GetDirectories(Root,"DemoSaves.pl-backup-*");
-                var passed=stops==2&&sessions.Count==2&&elapsed>0&&sessionSeconds==elapsed&&game.Playtime==100+elapsed&&state.Active.Count==0&&
+                interruptedRestoreRecovered=interruptedRestoreRecovered||Directory.Exists(Path.Combine(Root,"DemoSaves"))&&!File.Exists(Path.Combine(Root,"DemoSaves.pl-restore"));
+                var passed=interruptedRestoreRecovered&&runningHistoryRestoresRejected==2&&stops==2&&sessions.Count==2&&elapsed>0&&sessionSeconds==elapsed&&game.Playtime==100+elapsed&&state.Active.Count==0&&
                     launches.Length==2&&launches[0]=="cloud-before-launch"&&launches[1]=="session-1"&&content=="session-2"&&allUploaded&&backups.Length>=1&&
                     game.Favorite&&game.Notes=="Preferences from the second device"&&settingsViewCreated&&launchTimes.Count==2&&launchTimes.All(ms=>ms<10000);
                 File.WriteAllText(Path.Combine(Root,"runtime-result.json"),JsonConvert.SerializeObject(new{passed,mode=PlayniteApi.ApplicationInfo.Mode.ToString(),callbacks=stops,
-                    elapsedSeconds=elapsed,ledgerSessionSeconds=sessionSeconds,displayedPlaytime=game.Playtime,expectedPlaytime=100+elapsed,
+                    interruptedRestoreRecovered,runningHistoryRestoresRejected,elapsedSeconds=elapsed,ledgerSessionSeconds=sessionSeconds,displayedPlaytime=game.Playtime,expectedPlaytime=100+elapsed,
                     launches,launchMilliseconds=launchTimes,saveHead=content,allRevisionsUploaded=allUploaded,restoreBackups=backups.Length,favorite=game.Favorite,notes=game.Notes,settingsViewCreated,
                     backgroundUiHeartbeats,game="Synthetic Cloud Trail fixture; not a commercial game",appVersion=PlayniteApi.ApplicationInfo.ApplicationVersion.ToString()},Formatting.Indented));
                 if(!passed)throw new Exception("Runtime assertions failed; see runtime-result.json.");
@@ -88,13 +94,13 @@ public sealed class HostProbe : GenericPlugin
             var list=Elements<ListBox>(manager).Single();var game=list.Items.OfType<Game>().Single(g=>g.Id==GameId);list.SelectedItem=game;Capture("manage-games",manager);
             var detailsWatcher=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(100)};
             detailsWatcher.Tick+=(detailsSender,detailsArgs)=>{
-                var details=Application.Current.Windows.OfType<Window>().FirstOrDefault(w=>w.Title.StartsWith("Manage sync —",StringComparison.Ordinal)&&w.IsVisible);if(details==null)return;detailsWatcher.Stop();Capture("manage-sync",details);
-                gameManagerVerified=Buttons(details).Any(b=>Convert.ToString(b.Content)=="Save sync & preferences");Buttons(details).Single(b=>Convert.ToString(b.Content)=="Close").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var details=Application.Current.Windows.OfType<Window>().FirstOrDefault(w=>w.Title=="Playnite Link — Cloud Trail — Playnite Link Demo"&&w.IsVisible);if(details==null)return;detailsWatcher.Stop();Capture("manage-sync",details);
+                gameManagerVerified=Buttons(details).Any(b=>Convert.ToString(b.Content)=="View save folder");Buttons(details).Single(b=>Convert.ToString(b.Content)=="Done").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             };detailsWatcher.Start();
-            Buttons(manager).Single(b=>Convert.ToString(b.Content)=="Manage sync").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Buttons(manager).Single(b=>Convert.ToString(b.Content)=="Open game").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             if(manager.IsVisible)manager.Close();
         };managerWatcher.Start();
-        Buttons(account).Single(b=>Convert.ToString(b.Content)=="Manage games").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Buttons(account).Single(b=>Convert.ToString(b.Content)=="Your games").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if(!gameManagerVerified||!account.IsVisible)throw new Exception("Game manager did not preserve the account window");
     }
     void Capture(string name,Window window)
@@ -144,7 +150,7 @@ public sealed class HostProbe : GenericPlugin
         // Launches no longer scan/query the cloud. Background discovery records
         // the conflict first; a known conflict still requires a launch choice.
         await subject.SyncPersonalAsync(false,null);
-        Watch("Choose a version","conflict-cancel","Cancel");
+        Watch("Cloud conflict —","conflict-cancel","Decide later");
         PlayniteApi.StartGame(GameId);
         VerifyCancellationAndResolve();
     }
@@ -176,7 +182,7 @@ public sealed class HostProbe : GenericPlugin
             {
                 for(int i=0;i<100&&!subject.WasLaunchCheckCancelled(GameId);i++)await Task.Delay(100);
                 cancelledLaunch=subject.WasLaunchCheckCancelled(GameId);if(!cancelledLaunch)throw new Exception("Conflict cancellation did not finish within 10 seconds.");
-                Watch("Choose a version","conflict-resolve","Use cloud version "+cloudChoiceHash.Substring(0,8));
+                Watch("Cloud conflict —","conflict-resolve","Use cloud version "+cloudChoiceHash.Substring(0,8));
                 await subject.SyncPersonalAsync(true,null);
                 var restored=File.ReadAllText(Path.Combine(Root,"DemoSaves","progress.dat"));
                 var window=PlayniteApi.Dialogs.CreateWindow(new WindowCreationOptions());window.Title="Portable settings visual test";window.Width=760;window.Height=610;
@@ -191,12 +197,14 @@ public sealed class HostProbe : GenericPlugin
                 var previous=subject.PersonalVault.Heads(gameKey,"save").Single();
                 var remoteBranch=Rev("save",Data("peer-progress-for-local-choice"),previous.Hash());remoteBranch.Version=2;remoteBranch.Data=subject.SaveBlobs.ImportLegacy(remoteBranch.Data);subject.PersonalVault.Add(remoteBranch);
                 File.WriteAllText(Path.Combine(Root,"DemoSaves","progress.dat"),"local-progress-kept");
-                Watch("Choose a version","conflict-local","Use this device");
+                Watch("Cloud conflict —","conflict-local","Keep local saves");
                 await subject.SyncPersonalAsync(true,null);
                 var localChoiceVerified=File.ReadAllText(Path.Combine(Root,"DemoSaves","progress.dat"))=="local-progress-kept"&&subject.PersonalVault.Heads(gameKey,"save").Count==1&&subject.PersonalVault.Read(subject.PersonalVault.Objects).ContainsKey(remoteBranch.Hash());
-                var passed=localChoiceVerified&&navigationStable&&cancelledLaunch&&stops==2&&File.ReadAllLines(Path.Combine(Root,"demo-launches.txt")).Length==2&&restored=="cloud-choice-after-conflict"&&
+                await (Task)typeof(PlaytimePlugin).GetMethod("RestoreHistoryCoreAsync",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(subject,new object[]{gameKey,remoteBranch});
+                var stoppedHistoryRestoreVerified=File.ReadAllText(Path.Combine(Root,"DemoSaves","progress.dat"))=="peer-progress-for-local-choice"&&subject.PersonalVault.Heads(gameKey,"save").Single().Hash()!=remoteBranch.Hash();
+                var passed=stoppedHistoryRestoreVerified&&localChoiceVerified&&navigationStable&&cancelledLaunch&&stops==2&&File.ReadAllLines(Path.Combine(Root,"demo-launches.txt")).Length==2&&restored=="cloud-choice-after-conflict"&&
                     subject.PersonalVault.Heads(gameKey,"save").Count==1;
-                File.WriteAllText(Path.Combine(Root,"visual-result.json"),JsonConvert.SerializeObject(new{passed,navigationStable,gameManagerVerified,unsavedDraftPreserved=navigationStable,cancelledLaunch,cloudChoiceVerified=restored=="cloud-choice-after-conflict",localChoiceVerified,conflictResolutions=2,remainingSaveHeads=subject.PersonalVault.Heads(gameKey,"save").Count,callbacks=stops,restored,
+                File.WriteAllText(Path.Combine(Root,"visual-result.json"),JsonConvert.SerializeObject(new{passed,stoppedHistoryRestoreVerified,navigationStable,gameManagerVerified,unsavedDraftPreserved=navigationStable,cancelledLaunch,cloudChoiceVerified=restored=="cloud-choice-after-conflict",localChoiceVerified,conflictResolutions=2,remainingSaveHeads=subject.PersonalVault.Heads(gameKey,"save").Count,callbacks=stops,restored,
                     screenshots=new[]{"demo-library.png","manage-games.png","manage-sync.png","conflict-cancel.png","conflict-resolve.png","conflict-local.png","settings.png","personal-account.png","devices.png","security.png"},
                     method="Actual Playnite WPF windows rendered by test-only in-process companion; buttons invoked via WPF test events, not Windows input automation"},Formatting.Indented));
                 File.WriteAllText(Path.Combine(Root,"host-result.json"),JsonConvert.SerializeObject(new{passed,runtime=JsonConvert.DeserializeObject(File.ReadAllText(Path.Combine(Root,"runtime-result.json"))),

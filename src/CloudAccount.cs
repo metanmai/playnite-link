@@ -20,7 +20,7 @@ namespace PlaytimeRclone
         public static JObject Parse(string json)
         {
             if(String.IsNullOrWhiteSpace(json))return new JObject { {"State",""} };
-            var result=JObject.Parse(json);
+            var result=JsonSafety.Object(json);
             if(result["State"]!=null&&result["State"].Type!=JTokenType.String)throw new InvalidDataException("Unexpected Rclone configuration state.");
             return result;
         }

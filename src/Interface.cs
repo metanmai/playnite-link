@@ -32,7 +32,7 @@ namespace PlaytimeRclone
         private static StackPanel Card(Panel parent,string title,string description=null)
         {
             var body=new StackPanel();var border=new Border{Background=Surface,BorderBrush=Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Padding=new Thickness(20),Margin=new Thickness(0,0,0,16),Child=body};
-            ApplyTheme(border,Border.BackgroundProperty,"ButtonBackgroundBrush",Surface);ApplyTheme(border,Border.BorderBrushProperty,"PopupBorderBrush",Line);parent.Children.Add(border);Label(body,title,18).FontWeight=FontWeights.SemiBold;if(description!=null)Label(body,description,14,true);return body;
+            ApplyTheme(border,Border.BackgroundProperty,"ButtonBackgroundBrush",Surface);ApplyTheme(border,Border.BorderBrushProperty,"PopupBorderBrush",Line);parent.Children.Add(border);Label(body,title,18).FontWeight=FontWeights.SemiBold;if(!String.IsNullOrWhiteSpace(description))Label(body,description,14,true);return body;
         }
         private static void StyleAction(Button button,bool primary=false)
         {
@@ -55,7 +55,7 @@ namespace PlaytimeRclone
                 var header=new DockPanel{LastChildFill=true};var close=new Button{Content="Close"};StyleAction(close);close.Click+=(_,e)=>window.Close();DockPanel.SetDock(close,Dock.Right);header.Children.Add(close);
                 header.Children.Add(new TextBlock{Text="PLAYNITE LINK",FontSize=12,Foreground=Muted,VerticalAlignment=VerticalAlignment.Center});body.Children.Add(header);
             }else Label(body,"PLAYNITE LINK",12,true);
-            Label(body,title,28).FontWeight=FontWeights.SemiBold;Label(body,description,14,true);
+            Label(body,title,28).FontWeight=FontWeights.SemiBold;if(!String.IsNullOrWhiteSpace(description))Label(body,description,14,true);
             if(section!=null)
             {
                 var nav=Actions(body);

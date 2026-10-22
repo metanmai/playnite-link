@@ -24,7 +24,7 @@ namespace PlaytimeRclone
         public HltbProgress(string root)
         {
             path=Path.Combine(root,"hltb-progress.json");
-            receipts=File.Exists(path)?JsonConvert.DeserializeObject<Dictionary<string,HltbProgressReceipt>>(File.ReadAllText(path)):new Dictionary<string,HltbProgressReceipt>();
+            receipts=File.Exists(path)?JsonSafety.Deserialize<Dictionary<string,HltbProgressReceipt>>(File.ReadAllText(path)):new Dictionary<string,HltbProgressReceipt>();
             if(receipts==null)throw new InvalidDataException("Invalid HLTB upload receipts.");
         }
         // Absolute progress is idempotent after a timeout/crash. Always read the

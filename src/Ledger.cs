@@ -103,7 +103,7 @@ namespace PlaytimeRclone
     }
     public sealed class Enrollment
     {
-        public string Local,Source;
+        public string Local,Source,SharedKey;
         public ulong Original,Baseline;
         public ulong? Count;
     }
@@ -148,7 +148,7 @@ namespace PlaytimeRclone
             lease = new FileStream(Path.Combine(directory, "writer.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             try
             {
-                state = File.Exists(path) ? JsonConvert.DeserializeObject<State>(File.ReadAllText(path)) : new State();
+                state = File.Exists(path) ? JsonSafety.Deserialize<State>(File.ReadAllText(path)) : new State();
                 Validate(state);
                 if (!File.Exists(path)) Commit(state);
             }
@@ -171,7 +171,7 @@ namespace PlaytimeRclone
                     !DateTimeOffset.TryParse(active.Value.StartedUtc, out started)) throw new InvalidDataException("Invalid pending session.");
             }
         }
-        private State Clone() { return JsonConvert.DeserializeObject<State>(JsonConvert.SerializeObject(state)); }
+        private State Clone() { return JsonSafety.Deserialize<State>(JsonConvert.SerializeObject(state)); }
         private void Commit(State next)
         {
             Validate(next);
@@ -185,8 +185,8 @@ namespace PlaytimeRclone
             {
                 Mapping map;var result=new State{Device=state.Device};
                 if(!state.Mappings.TryGetValue(local,out map))return result;
-                result.Mappings.Add(local,JsonConvert.DeserializeObject<Mapping>(JsonConvert.SerializeObject(map)));
-                result.Entries=JsonConvert.DeserializeObject<List<Entry>>(JsonConvert.SerializeObject(state.Entries.Where(e=>e.Game==map.Key)));
+                result.Mappings.Add(local,JsonSafety.Deserialize<Mapping>(JsonConvert.SerializeObject(map)));
+                result.Entries=JsonSafety.Deserialize<List<Entry>>(JsonConvert.SerializeObject(state.Entries.Where(e=>e.Game==map.Key)));
                 return result;
             }
         }
@@ -196,6 +196,8 @@ namespace PlaytimeRclone
         }
         public void Enroll(string local, string source, ulong original, ulong baseline,ulong? count=null)
         {EnrollBatch(new[]{new Enrollment{Local=local,Source=source,Original=original,Baseline=baseline,Count=count}});}
+        public void EnrollShared(string local,string key,ulong original)
+        {if(!Regex.IsMatch(key??"","^[a-f0-9]{64}$"))throw new InvalidDataException("Invalid selected cloud game.");EnrollBatch(new[]{new Enrollment{Local=local,Source="manual:linked:"+key,SharedKey=key,Original=original,Baseline=0,Count=0}});}
         public void EnrollBatch(IEnumerable<Enrollment> requests)
         {
             lock (Gate)
@@ -203,7 +205,8 @@ namespace PlaytimeRclone
                 var next = Clone();var added=false;
                 foreach(var request in requests)
                 {
-                var local=request.Local;var source=request.Source;var original=request.Original;var baseline=request.Baseline;var count=request.Count;var key = Identity.Hash(source);
+                var local=request.Local;var source=request.Source;var original=request.Original;var baseline=request.Baseline;var count=request.Count;var key = request.SharedKey??Identity.Hash(source);
+                if(request.SharedKey!=null&&(!Regex.IsMatch(key??"","^[a-f0-9]{64}$")||source!="manual:linked:"+key))throw new InvalidDataException("Invalid selected cloud game.");
                 if (next.Mappings.ContainsKey(local) || next.Mappings.Values.Any(x => x.Key == key))
                     throw new InvalidOperationException("Already enrolled or another local game uses this shared identity. Mapping changes require a reviewed migration.");
                 next.Mappings.Add(local, new Mapping { Key = key, Source = source, Original = original, Expected = original });

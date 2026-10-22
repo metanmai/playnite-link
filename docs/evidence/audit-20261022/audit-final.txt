@@ -1,0 +1,9 @@
+PASS capture rejects same-length corrupted cached blobs before publication
+PASS an existing package with a missing manifest is not a shared removal
+PASS queued corrupted blobs are rejected before starting an upload
+PASS deep JSON fails at the extension boundary without changing host settings
+PASS JSON boundary preserves valid input and rejects additional documents
+PASS disabled initialization does not crash the game menu
+PASS remote settings cannot grant another device's path-sharing consent
+PASS interrupted add-on install blocks capture, restaging and premature receipt consumption
+RESULT 8 passed, 0 failed

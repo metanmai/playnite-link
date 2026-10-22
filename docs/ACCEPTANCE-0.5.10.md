@@ -1,0 +1,5 @@
+# Playnite Link 0.5.10: concise interface
+
+Elapsed time is visible only during active work. Completed, failed, waiting and paused states hide it; empty or duplicate status lines and empty descriptions take no space. Completion shows Up to date without repeating the duration. Cached-record implementation details and background-work reassurance paragraphs were removed. Game, linking, overview, device, add-on and setup copy was shortened while preserving actionable errors, cloud identity choices, folder ownership warnings and conflict choices.
+
+Built with the installed Playnite SDK. The 58 ledger/game-picker assertions passed. Actual isolated Desktop A and Fullscreen B exercised linking, automatic first sync, save-file transfer, real sessions, repeated syncs and reopening A. The UI probe asserts no visible elapsed timer after completion, no removed reassurance copy and collapsed history controls. Rendered WPF game-page screenshots were inspected. This presentation-only update uses local Rclone peer tests; the prior real-Drive acceptance remains recorded in 0.5.9.

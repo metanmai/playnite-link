@@ -1,0 +1,262 @@
+Built extension and tests in C:\Users\win11\AppData\Local\PlayniteLink-Closure-5f72b761\final-regression\build
+PASS capture rejects same-length corrupted cached blobs before publication
+PASS an existing package with a missing manifest is not a shared removal
+PASS queued corrupted blobs are rejected before starting an upload
+PASS deep JSON fails at the extension boundary without changing host settings
+PASS JSON boundary preserves valid input and rejects additional documents
+PASS disabled initialization does not crash the game menu
+PASS remote settings cannot grant another device's path-sharing consent
+PASS interrupted add-on install blocks capture, restaging and premature receipt consumption
+RESULT 8 passed, 0 failed
+PASS abrupt kill + two restarts: existing root / staged
+PASS abrupt kill + two restarts: existing root / journal
+PASS abrupt kill + two restarts: existing root / backup
+PASS abrupt kill + two restarts: existing root / installed
+PASS abrupt kill + two restarts: existing root / committed
+PASS abrupt kill + two restarts: absent root / staged
+PASS abrupt kill + two restarts: absent root / journal
+PASS abrupt kill + two restarts: absent root / backup
+PASS abrupt kill + two restarts: absent root / installed
+PASS abrupt kill + two restarts: absent root / committed
+PASS malformed journal fails closed and is preserved
+11 passed, 0 failed
+PASS new setups require explicit automatic game selection
+PASS progress measures whole sync and individual stage
+PASS stopping remains active and pause freezes elapsed
+PASS failure and completion clear busy and preserve outcome
+PASS selecting a cloud game uses its existing identity without adding observed total twice
+PASS cloud picker groups one game linked on two devices without matching names
+PASS additive baseline plus sessions
+PASS overlapping history uses maximum, never sum
+PASS duplicate delivery is idempotent
+PASS same logical ID differing contents fails closed
+PASS merge commutes and associates for 100 randomized orderings
+PASS separate identities never mix
+PASS clock skew never chooses a winning total
+PASS schema version rejected
+PASS negative unsigned seconds rejected
+PASS invalid ID rejected
+PASS invalid timestamp rejected
+PASS backwards timestamp rejected
+PASS absurd duration rejected
+PASS manual identity normalized
+PASS manual path injection rejected
+PASS provider ID namespace prevents collisions
+PASS provider opaque IDs preserved
+PASS manual games cannot implicitly match by name
+PASS duplicate local identity blocked
+PASS only explicitly enrolled manual games are captured
+PASS removing local link preserves shared history
+PASS cannot remove link with unfinished session
+PASS remapping an enrolled game blocked
+PASS start-stop exact elapsed and duplicate stop ignored
+PASS unenrolled games ignored
+PASS unfinished session prevents accidental new session
+PASS simultaneous games keep distinct tokens
+PASS restart retains offline sessions and device identity
+PASS pending crash session retained without guessed duration
+PASS one writer per local profile
+PASS corrupted local state fails without reset
+PASS atomic write retains previous backup
+PASS failed disk commit does not mutate in-memory session state
+PASS projection uses exact session seconds without double counting
+PASS projection skips an active game
+PASS outside playtime edit is surfaced
+PASS projection crash after DB write recovers idempotently
+PASS projection failure before DB write retries safely
+PASS session after interrupted projection uses intended checkpoint
+PASS reviewed migration does not sum device histories
+PASS two devices offline sessions converge after repeated sync
+PASS partial upload retries without duplication
+PASS partial failed pull does not merge
+PASS hash mismatch rejects remote modification
+PASS truncated JSON rejected
+PASS unknown remote fields rejected
+PASS conflicting remote session never silently wins
+PASS warm persistent-cache sync makes no upload call; new sessions still publish
+PASS shell metacharacters are quoted as argv
+PASS unconfigured cloud settings can be saved without enabling sync
+PASS configured cloud settings validate before saving
+PASS trailing slashes escaped for Windows argv
+PASS real Rclone local backend end-to-end two device convergence
+PASS real Rclone simultaneous offline publication loses no sessions
+PASS batched metadata pulls only the four permitted object areas
+RESULT 61 passed, 0 failed
+PASS fresh vault profile preserves original history and saved OAuth connection
+PASS invalid vault profile selection fails without clearing existing state
+PASS first device publishes a root revision
+PASS identical repeated sync creates no revision
+PASS second empty device restores cloud root
+PASS remote-only descendant restores automatically
+PASS local-only edit publishes child
+PASS divergent edits invoke conflict chooser
+PASS cancel preserves files checkpoints and revision count
+PASS explicit local resolution preserves remote history
+PASS two concurrent roots form two heads
+PASS multihead cloud choice creates resolution with both parents
+PASS unseen concurrent branch survives an earlier resolution
+PASS clock skew cannot choose a winner
+PASS empty local folder never silently erases cloud
+PASS empty snapshot is allowed only after explicit resolution
+PASS legacy empty save needs no conversion branch
+PASS unrelated remote ancestry requires review
+PASS same revision id different contents is rejected
+PASS missing ancestors reject pull before local import
+PASS cross-game ancestry is rejected
+PASS cross-kind ancestry is rejected
+PASS tampered cloud object rejected
+PASS unknown schema properties rejected
+PASS reject unsafe save path ../escape
+PASS reject unsafe save path /absolute
+PASS reject unsafe save path C:/root
+PASS reject unsafe save path slot/../../bad
+PASS reject unsafe save path slot\escape
+PASS reject unsafe save path slot/file:stream
+PASS reject unsafe save path CON
+PASS reject unsafe save path NUL.txt
+PASS reject unsafe save path slot/trailing.
+PASS reject unsafe save path slot/trailing 
+PASS reject unsafe save path slot//x
+PASS case-insensitive path collisions rejected
+PASS file-directory collisions rejected
+PASS invalid base64 rejected
+PASS drive root cannot be managed as save directory
+PASS shared Documents directory cannot be managed
+PASS snapshot captures nested binary content
+PASS restore replaces entire folder and preserves local backup
+PASS restore rejects local changes since capture
+PASS restore validates all paths before writing
+PASS failed apply cannot advance local checkpoint
+PASS portable preferences round trip without cloud credentials
+PASS arbitrary configuration keys cannot enter preferences
+PASS personal vault pin prevents switching user storage
+PASS same vault reconnect and restart preserves pin
+PASS damaged local state fails without resetting
+PASS long revision chains validate without recursive stack growth
+PASS Rclone account completion accepts an empty final State
+PASS Rclone OAuth continuation passes state and selected value without a shell
+PASS cancelling cloud OAuth keeps configuration unselected
+PASS provider secrets are marked for masked entry
+PASS valid configured personal remote passes settings validation
+PASS real Rclone two dummy personal accounts are isolated
+PASS real Rclone two devices converge with conflict backup and retry
+PASS personal Drive setup skips the technical Shared Drive prompt
+PASS provider booleans and example choices have structured UI metadata
+PASS a new local alias can reconnect only with matching physical vault identity
+PASS changing account with the same remote name cannot bypass the vault pin
+PASS reconnect proof and original vault identity survive restart
+PASS connection test identifies the exact folder and rejects ambiguous duplicates
+RESULT 64 passed, 0 failed
+PASS stream and restore a 64 MiB save without a save-size cap
+PASS unchanged files deduplicate across paths and revisions
+PASS capture more than the old 4096 file limit
+PASS blob manifests reject path traversal and negative sizes
+PASS missing blobs cannot modify existing saves
+PASS same-length corruption fails SHA-256 before swapping folders
+PASS legacy inline snapshots migrate with common-version ancestry intact
+PASS migrating before a remote legacy descendant arrives does not invent a conflict
+PASS cancelled streaming capture cleans staging without publishing partial blobs
+PASS two equivalent migration branches converge without a false conflict
+PASS device profiles round trip without cloud credentials
+PASS remote per-device preferences propagate and resolve concurrent edits
+PASS device pause remove and explicit re-enable converge
+PASS concurrent remove wins over an unseen resume
+PASS invalid remote settings and cross-device parents are rejected
+PASS launch during background staging prevents save replacement
+RESULT 16 passed, 0 failed
+PASS local protection defaults off without inventing a user passcode
+PASS passcode requires minimum length
+PASS passcode verifier persists under Windows DPAPI without plaintext
+PASS lock now timeout and restart all require authentication
+PASS failed-attempt lockout persists and expires without sleeping
+PASS locked controls cannot replace or remove protection
+PASS a session lock during passcode verification cannot be undone by its late result
+PASS damaged protected settings do not silently reset security
+PASS unlocked user can remove local protection
+RESULT 9 passed, 0 failed
+PASS interface uses active Playnite theme resources
+PASS fullscreen palette falls back to fullscreen theme resources instead of white
+PASS startup covers library and existing settings before unlocking
+PASS gate still receives password text through the WPF input pipeline
+PASS closing lock screen requests exit and never reveals library
+PASS wrong passcode keeps all app surfaces blocked
+PASS new plugin windows are covered while locked
+PASS a theme opacity animation cannot reveal a covered window
+PASS a startup dialog re-enabling its owner is remembered behind the lock
+PASS verified passcode restores window states exactly
+PASS expiry automatically relocks without a menu action
+PASS passcode unlocks again after expiry
+PASS manual lock immediately covers the app again
+PASS disposal restores surfaces and removes the gate
+PASS unlock-screen construction failure hides app and requests shutdown
+RESULT 15 passed, 0 failed
+PASS add-on sync defaults off on every device
+PASS capture includes add-ons and themes, excluding settings, credentials and sync extension
+PASS unchanged package metadata avoids rehashing assets
+PASS new device discovers peer packages without publishing deletions
+PASS real restart helper installs verified packages and preserves local settings
+PASS independent installs on both peers merge without a primary device
+PASS device-only theme changes neither publish nor receive changes
+PASS simultaneous edits preserve both branches for explicit resolution
+PASS shared removal backs up code and retains extension data
+Apply diagnostic:  
+PASS corrupt staged files fail verification before modifying installations
+PASS unsafe and protected package destinations are rejected
+PASS identical independent installs merge without a conflict
+PASS changes after preview abort staging without replacing local code
+Apply diagnostic:  
+PASS mid-install failure rolls back earlier packages and retry succeeds
+PASS device-only choices survive restart, including not-yet-installed packages
+PASS conflict replacement preserved the discarded branch in backup
+PASS shared removal cannot remove this device's active theme
+PASS theme folder parentheses survive capture, sync and real helper install
+RESULT 18 passed, 0 failed
+PASS existing detailed history is adopted without adding baseline time twice
+PASS cloned old history on two devices has one stable identity
+PASS independent old histories merge without losing disjoint sessions
+PASS native local session is bound instead of imported twice
+PASS ten repeated sync projections never create duplicate sessions
+PASS restart retains binding receipts
+PASS busy native writer is deferred without touching data
+PASS conflicting historical duration fails closed across peers
+PASS native and ledger duration disagreement cannot become another session
+PASS externally edited imported session is preserved for review
+PASS externally removed imported session is not silently recreated
+PASS ambiguous duplicate timestamps require review
+PASS failed destination write can retry exactly once
+PASS missing receipt after a crash adopts exact existing session
+PASS old ledger canonical serialization remains byte compatible
+PASS new history stays out of the legacy ledger namespace
+PASS separate metadata areas converge counts and history repeatedly
+PASS copied foreign native row with lost receipt cannot become a duplicate
+RESULT 18 passed, 0 failed
+PASS absolute total updates once across repeated syncs
+PASS two devices converge without adding totals
+PASS stale device cannot reduce greater online progress
+PASS restart uses durable success receipt
+PASS failed upload retains intent for retry
+PASS timeout after server commit cannot double progress
+PASS missing authenticated profile never creates another entry
+PASS periodic fresh read repairs external stale overwrite
+PASS native adapter rejects a different online submission
+PASS native adapter rejects stale mapping to another HLTB game
+PASS native adapter accepts the intended submission and game
+RESULT 11 passed, 0 failed
+PASS progressing history download is not killed at 105 seconds
+PASS stalled connection times out without discarding progress
+PASS initial listing has bounded grace and absolute work cap
+PASS invalid cached records are preserved in quarantine for redownload
+PASS valid immutable cache survives verification unchanged
+PASS real Rclone repairs a damaged cache and leaves cloud unchanged
+PASS cache seeding copies verified objects and preserves source and local mappings
+RESULT 7 passed, 0 failed
+PASS corrupt download rejected before extraction
+PASS archive paths cannot escape destination
+PASS official pinned runtime downloaded, verified and executed
+PASS subsequent setup reuses installed runtime
+RESULT 4 passed, 0 failed
+PASS actual helper kill and two recovery runs: journal
+PASS actual helper kill and two recovery runs: backup
+PASS actual helper kill and two recovery runs: installed
+PASS actual helper kill and two recovery runs: receipt
+All requested regression suites and helper termination tests passed. Evidence: C:\Users\win11\AppData\Local\PlayniteLink-Closure-5f72b761\final-regression

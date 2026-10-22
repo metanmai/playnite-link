@@ -31,7 +31,7 @@ namespace PlaytimeRclone
             if(File.Exists(path))
             {
                 var encrypted=Convert.FromBase64String(File.ReadAllText(path));var json=ProtectedData.Unprotect(encrypted,Encoding.UTF8.GetBytes("PlayniteLink.LocalLock.v1"),DataProtectionScope.CurrentUser);
-                try{state=JsonConvert.DeserializeObject<LocalLockState>(Encoding.UTF8.GetString(json));}finally{Array.Clear(json,0,json.Length);}
+                try{state=JsonSafety.Deserialize<LocalLockState>(Encoding.UTF8.GetString(json));}finally{Array.Clear(json,0,json.Length);}
                 if(state==null||state.Version!=1||state.Iterations<600000||state.Iterations>2000000||state.UnlockMinutes<1||state.UnlockMinutes>60||state.FailedAttempts<0||
                     Convert.FromBase64String(state.Salt??"").Length!=32||Convert.FromBase64String(state.Hash??"").Length!=32)throw new InvalidDataException("Local security settings are damaged. Protection was not silently disabled.");
             }

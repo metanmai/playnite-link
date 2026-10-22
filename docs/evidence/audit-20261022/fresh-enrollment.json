@@ -1,0 +1,9 @@
+{
+  "provider": "Google Drive",
+  "syntheticTestVaultOnly": true,
+  "freshBrowserEnrollment": true,
+  "uploadVerified": true,
+  "passed": true,
+  "downloadVerified": true,
+  "sha256Matched": true
+}

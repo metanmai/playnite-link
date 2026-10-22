@@ -1,0 +1,50 @@
+[
+  {
+    "Suite": "AuditTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "CrashRecoveryTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "Tests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "VaultTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "StreamingTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "SecurityTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "ApplicationLockTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "SetupTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "ActivityTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "HltbTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "MetadataTransferTests",
+    "ExitCode": 0
+  },
+  {
+    "Suite": "RuntimeTests",
+    "ExitCode": 0
+  }
+]

@@ -1,0 +1,11 @@
+
+{
+  "passed": true,
+  "authenticated": true,
+  "liveAbsoluteSubmissions": 2,
+  "repeatedReceiptChecks": 5,
+  "progressUnchanged": true,
+  "listsScoresCompletionsPreserved": true,
+  "credentialsPublished": false
+}
+Private live-auth lab retained at C:\Users\win11\AppData\Local\pl-hltb-live-cf66ea9a

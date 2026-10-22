@@ -27,7 +27,7 @@ namespace PlaytimeRclone
    config.Validate();var remote=config.RemoteFolder.TrimEnd('/');var colon=remote.IndexOf(':');var relative=remote.Substring(colon+1);var slash=relative.LastIndexOf('/');
    var name=relative.Substring(slash+1);var parent=remote.Substring(0,colon+1)+(slash<0?"":relative.Substring(0,slash));
    if(name.Length==0){Run(config,new List<string>{"lsjson",remote,"--dirs-only","--max-depth","1"});return new ConnectionResult{FolderExists=true,Message="Connection works. Cloud root is readable."};}
-   var folders=JArray.Parse(Run(config,new List<string>{"lsjson",parent,"--dirs-only","--max-depth","1"}));
+   var folders=JsonSafety.Array(Run(config,new List<string>{"lsjson",parent,"--dirs-only","--max-depth","1"}));
    return ParseFolders(folders,name);
   }
   public static ConnectionResult ParseFolders(JArray folders,string name)

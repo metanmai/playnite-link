@@ -4,12 +4,16 @@ param(
     [switch]$KeepOpen,
     [switch]$SkipBuild,
     [switch]$LockProbe,
-    [switch]$OnboardingProbe
+    [switch]$OnboardingProbe,
+    [string]$BuildDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-if(!$SkipBuild){& (Join-Path $projectRoot 'build.ps1') -PlaynitePath $PlaynitePath}
-$labRoot = Join-Path $env:LOCALAPPDATA ('playnite-link-probe-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+$buildDir = if($BuildDirectory){[IO.Path]::GetFullPath($BuildDirectory)}else{Join-Path $projectRoot 'build'}
+if(!$SkipBuild){& (Join-Path $projectRoot 'build.ps1') -PlaynitePath $PlaynitePath -BuildDirectory $buildDir}
+$labParent=Join-Path $env:USERPROFILE 'PlayniteLinkTestLabs'
+New-Item -ItemType Directory -Force $labParent | Out-Null
+$labRoot = Join-Path $labParent ('probe-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 $appPath = Join-Path $labRoot 'app'
 $profilePath = Join-Path $labRoot 'profile'
 $subjectPath = Join-Path $profilePath 'Extensions/PlaytimeRclone'
@@ -17,7 +21,8 @@ $probePath = Join-Path $profilePath 'Extensions/HostProbe'
 New-Item -ItemType Directory -Force $appPath,$profilePath,$subjectPath,$probePath | Out-Null
 & robocopy $PlaynitePath $appPath /E /XD Extensions 'User Data' /XF '*.pdb' '*.log' 'unins*' /NFL /NDL /NJH /NJS /NP
 if ($LASTEXITCODE -ge 8) { throw 'Failed to copy installed Playnite to isolated test lab' }
-Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll'),(Join-Path $projectRoot 'extension.yaml') $subjectPath
+Copy-Item (Join-Path $buildDir 'PlayniteLink.dll'),(Join-Path $buildDir 'extension.yaml') $subjectPath
+if(Test-Path (Join-Path $buildDir 'SetupApply.ps1')){Copy-Item (Join-Path $buildDir 'SetupApply.ps1') $subjectPath}
 $commonPath = Join-Path $appPath 'Common.config'
 $pipeName = 'net.pipe://localhost/PlaytimeProbe' + [Guid]::NewGuid().ToString('N')
 (Get-Content $commonPath -Raw).Replace('net.pipe://localhost/PlaynitePipe',$pipeName) | Set-Content $commonPath
@@ -33,8 +38,8 @@ Type: GenericPlugin
 '@ | Set-Content (Join-Path $probePath 'extension.yaml')
 $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
-$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
-Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probePath
+$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
+Copy-Item (Join-Path $buildDir 'PlayniteLink.dll') $probePath
 $probeSource=if($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}else{'PersonalHostProbe.cs'}
 & $compilerPath /nologo /target:library "/out:$probePath/HostProbe.dll" @references (Join-Path $PSScriptRoot $probeSource)
 if ($LASTEXITCODE -ne 0) { throw 'Host probe compile failed' }
@@ -76,8 +81,19 @@ $resultPath = Join-Path $profilePath 'host-result.json'
 $deadline = [DateTime]::UtcNow.AddSeconds(240)
 while (!(Test-Path $resultPath) -and [DateTime]::UtcNow -lt $deadline -and !$testProcess.HasExited) { Start-Sleep -Seconds 1 }
 # Shutdown is routed to this lab's unique named pipe, never the user's instance.
-if (!$KeepOpen -and !$testProcess.HasExited) { Start-Process $exePath -ArgumentList '--shutdown' -WindowStyle Hidden | Out-Null }
+if (!$KeepOpen -and !$OnboardingProbe -and !$testProcess.HasExited) { Start-Process $exePath -ArgumentList '--shutdown' -WindowStyle Hidden | Out-Null }
 if (!(Test-Path $resultPath)) { throw "Host probe did not finish; inspect $profilePath" }
+if($OnboardingProbe -and (Get-Content $resultPath -Raw|ConvertFrom-Json).passed){
+ if(!$testProcess.HasExited -and !$testProcess.WaitForExit(15000)){throw 'First instance did not exit'}
+ # The extension restart helper launches the next process after this one exits.
+ $restartResult=Join-Path $profilePath 'vault-restart-result.json';$restartDeadline=[DateTime]::UtcNow.AddSeconds(90)
+ while(!(Test-Path $restartResult)-and [DateTime]::UtcNow -lt $restartDeadline){Start-Sleep -Milliseconds 300}
+ Start-Process $exePath -ArgumentList '--shutdown' -WindowStyle Hidden | Out-Null
+ if(!(Test-Path $restartResult)){throw 'Restart verification did not finish'}
+ Copy-Item $restartResult (Join-Path $projectRoot ('docs/evidence/vault-switch-'+$Mode.ToLowerInvariant()+'-restart.json')) -Force
+ Write-Output (Get-Content $restartResult -Raw)
+ if(!(Get-Content $restartResult -Raw|ConvertFrom-Json).passed){throw 'Restart verification failed'}
+}
 $evidencePath = Join-Path $projectRoot 'docs/evidence'
 New-Item -ItemType Directory -Force $evidencePath | Out-Null
 $prefix=if($OnboardingProbe){'onboarding-'+$Mode.ToLowerInvariant()}elseif($LockProbe){'lock-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}

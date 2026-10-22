@@ -1,31 +1,11 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
-  - Version: 0.5.4
+  - Version: 0.5.11
     RequiredApiVersion: 6.18.0
-    ReleaseDate: 2026-10-20
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.4/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_4.pext
+    ReleaseDate: 2026-10-22
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.11/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_11.pext
     Changelog:
-      - Test and reset cloud connections with visible feedback.
-      - Reconnect saved sign-ins safely and use buttons for provider choices.
-  - Version: 0.5.3
-    RequiredApiVersion: 6.18.0
-    ReleaseDate: 2026-10-20
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.3/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_3.pext
-    Changelog:
-      - Add a resumable first-run setup walkthrough.
-      - Pause cancelled transfers and safely resume without restarting queued work.
-  - Version: 0.5.2
-    RequiredApiVersion: 6.18.0
-    ReleaseDate: 2026-10-20
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.2/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_2.pext
-    Changelog:
-      - Correct the extension author to the GitHub username metanmai.
-  - Version: 0.5.1
-    RequiredApiVersion: 6.18.0
-    ReleaseDate: 2026-10-20
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.1/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_1.pext
-    Changelog:
-      - Launch games without waiting for full cloud synchronization.
-      - Batch metadata requests and defer save replacement during play.
-      - Synchronize GameActivity history and optional existing online HLTB progress.
-      - Validate two-device convergence, conflict safety and launch timing.
+      - Recover interrupted save replacement and add-on installation using durable journals.
+      - Verify cached save blobs, constrain JSON depth and preserve local path-sharing consent.
+      - Protect history restores during game launch and play.
+      - Validate fresh Google enrollment, 41 live WAN scenarios and 247 regression checks.

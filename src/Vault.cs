@@ -150,7 +150,7 @@ namespace PlaytimeRclone
         public Vault(string root)
         {
             Objects = Path.Combine(root, "vault-objects"); Directory.CreateDirectory(Objects); statePath = Path.Combine(root, "vault-state.json");
-            State = File.Exists(statePath) ? JsonConvert.DeserializeObject<VaultState>(File.ReadAllText(statePath)) : new VaultState();
+            State = File.Exists(statePath) ? JsonSafety.Deserialize<VaultState>(File.ReadAllText(statePath)) : new VaultState();
             if (State == null || State.Version != 1 || State.Links == null || State.Remote == null ||
                 State.Links.Any(p => !Regex.IsMatch(p.Key,"^[a-f0-9]{64}$") || p.Value == null || p.Value.Save == null || p.Value.Preferences == null))
                 throw new InvalidDataException("Damaged vault state. Restore a reviewed .bak file.");
@@ -185,7 +185,7 @@ namespace PlaytimeRclone
                     link.Save.Content=Revision.ContentHashOf(blobs.ImportLegacy(previous.Data));
             }
             var parents=new HashSet<string>(all.Values.SelectMany(r=>r.Parents));
-            foreach(var pair in all.Where(p=>p.Value.Kind=="save"&&p.Value.Version==1&&!parents.Contains(p.Key)).ToList())
+            foreach(var pair in all.Where(p=>p.Value.Kind=="save"&&p.Value.Version==1&&p.Value.Data.Count>0&&!parents.Contains(p.Key)).ToList())
             {
                 var ancestry=new HashSet<string>();var pending=new Stack<string>();pending.Push(pair.Key);
                 while(pending.Count>0){var key=pending.Pop();if(!ancestry.Add(key))continue;foreach(var parent in all[key].Parents)pending.Push(parent);}
@@ -205,7 +205,7 @@ namespace PlaytimeRclone
                 CachedObject cached;
                 if(readCache.TryGetValue(path,out cached)&&cached.Length==length&&cached.Modified==info.LastWriteTimeUtc)
                 { result.Add(Path.GetFileNameWithoutExtension(path),cached.Revision);continue; }
-                var revision = JsonConvert.DeserializeObject<Revision>(File.ReadAllText(path),new JsonSerializerSettings { MissingMemberHandling=MissingMemberHandling.Error });
+                var revision = JsonSafety.Deserialize<Revision>(File.ReadAllText(path),new JsonSerializerSettings { MissingMemberHandling=MissingMemberHandling.Error });
                 if (revision == null) throw new InvalidDataException("Null vault object."); revision.Validate();
                 if (Path.GetFileNameWithoutExtension(path) != revision.Hash()) throw new InvalidDataException("Vault hash mismatch.");
                 readCache[path]=new CachedObject{Length=length,Modified=info.LastWriteTimeUtc,Revision=revision};
@@ -262,7 +262,7 @@ namespace PlaytimeRclone
             if(heads.Count==1 && choice==heads[0].Hash()) revisionId=heads[0].Hash();
             else
             {
-                var revision=new Revision { Version=kind=="save"&&selected.Values.Any(v=>v.StartsWith("blob:",StringComparison.Ordinal))?2:1,Game=game,Kind=kind,Device=device,Parents=heads.Select(h=>h.Hash()).OrderBy(x=>x,StringComparer.Ordinal).ToList(),Data=selected };
+                var revision=new Revision { Version=kind=="save"&&(selected.Count==0||selected.Values.Any(v=>v.StartsWith("blob:",StringComparison.Ordinal)))?2:1,Game=game,Kind=kind,Device=device,Parents=heads.Select(h=>h.Hash()).OrderBy(x=>x,StringComparer.Ordinal).ToList(),Data=selected };
                 Add(revision); revisionId=revision.Hash();
             }
             if(Revision.ContentHashOf(selected)!=hash)apply(selected);

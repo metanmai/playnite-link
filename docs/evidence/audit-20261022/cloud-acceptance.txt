@@ -1,0 +1,123 @@
+src\Blobs.cs(27,40): warning CS0649: Field 'PlaytimeRclone.BlobStore.RestoreBoundary' is never assigned to, and will always have its default value null
+Built extension and tests in \\wsl.localhost\Ubuntu\home\metanmai\Code\account-manager\build
+
+
+{
+  "passed": true,
+  "peer": "A",
+  "action": "A",
+  "mode": "Desktop",
+  "cloudName": "Picker Cloud Adventure",
+  "cloudIdentity": "0408cc1f1272b82635fc5b2d3d487e064909e1ea91138afc3eddfdf054dee55d",
+  "gameCount": 1,
+  "mappingCount": 1,
+  "playtime": 8,
+  "playCount": 1,
+  "gameActivitySessions": 1,
+  "gameActivitySeconds": 8,
+  "actualGameStarts": 1,
+  "actualGameStops": 1,
+  "repeatedSyncs": 6,
+  "selectedFromDeviceA": false,
+  "noDuplicates": true,
+  "failedCheckBlocksCreation": true,
+  "publicationRetryUsesSameIdentity": true,
+  "unpublishedProfileAncestorsCovered": true,
+  "simpleGamePage": true,
+  "linkedSaveFiles": true,
+  "automaticFirstSync": true
+}
+{
+  "passed": true,
+  "peer": "B",
+  "action": "B",
+  "mode": "Fullscreen",
+  "cloudName": "Picker Cloud Adventure",
+  "cloudIdentity": "0408cc1f1272b82635fc5b2d3d487e064909e1ea91138afc3eddfdf054dee55d",
+  "gameCount": 1,
+  "mappingCount": 1,
+  "playtime": 16,
+  "playCount": 2,
+  "gameActivitySessions": 2,
+  "gameActivitySeconds": 16,
+  "actualGameStarts": 1,
+  "actualGameStops": 1,
+  "repeatedSyncs": 6,
+  "selectedFromDeviceA": true,
+  "noDuplicates": true,
+  "failedCheckBlocksCreation": false,
+  "publicationRetryUsesSameIdentity": false,
+  "unpublishedProfileAncestorsCovered": false,
+  "simpleGamePage": true,
+  "linkedSaveFiles": true,
+  "automaticFirstSync": true
+}
+{
+  "passed": true,
+  "peer": "A",
+  "action": "Verify",
+  "mode": "Desktop",
+  "cloudName": "Picker Cloud Adventure",
+  "cloudIdentity": "0408cc1f1272b82635fc5b2d3d487e064909e1ea91138afc3eddfdf054dee55d",
+  "gameCount": 1,
+  "mappingCount": 1,
+  "playtime": 16,
+  "playCount": 2,
+  "gameActivitySessions": 2,
+  "gameActivitySeconds": 16,
+  "actualGameStarts": 0,
+  "actualGameStops": 0,
+  "repeatedSyncs": 6,
+  "selectedFromDeviceA": false,
+  "noDuplicates": true,
+  "failedCheckBlocksCreation": true,
+  "publicationRetryUsesSameIdentity": true,
+  "unpublishedProfileAncestorsCovered": true,
+  "simpleGamePage": true,
+  "linkedSaveFiles": true,
+  "automaticFirstSync": false
+}
+Two activity-enabled Playnite profiles retained at C:\Users\win11\PlayniteLinkTestLabs\picker-ae59ccf1
+{"passed":true,"name":"A-push","choice":"local","dialogs":0,"expected":"a1","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":0}
+{"passed":true,"name":"B-pull","choice":null,"dialogs":0,"expected":"a1","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"B-push","choice":null,"dialogs":0,"expected":"b2","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"A-pull","choice":null,"dialogs":0,"expected":"b2","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":1}
+{"passed":true,"name":"A-offline","choice":null,"dialogs":0,"expected":"a-offline","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":1}
+{"passed":true,"name":"B-diverge","choice":null,"dialogs":0,"expected":"b-cloud","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"A-cancel","choice":"cancel","dialogs":1,"expected":"a-offline","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":true,"backupFolders":1}
+{"passed":true,"name":"A-use-cloud","choice":"cloud","dialogs":1,"expected":"b-cloud","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"B-converge","choice":null,"dialogs":0,"expected":"b-cloud","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"B-offline","choice":null,"dialogs":0,"expected":"b-offline","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"A-diverge","choice":null,"dialogs":0,"expected":"a-cloud","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"B-keep-local","choice":"local","dialogs":1,"expected":"b-offline","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"A-converge","choice":null,"dialogs":0,"expected":"b-offline","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":3}
+{"passed":true,"name":"A-offline-retry","choice":null,"dialogs":0,"expected":"a-retry","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":3}
+{"passed":true,"name":"B-before-retry","choice":null,"dialogs":0,"expected":"b-retry","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"A-failed-transfer","choice":null,"dialogs":0,"expected":"a-retry","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":true,"backupFolders":3}
+{"passed":true,"name":"A-retry-cloud","choice":"cloud","dialogs":1,"expected":"b-retry","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":4}
+{"passed":true,"name":"B-retry-converge","choice":null,"dialogs":0,"expected":"b-retry","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":2}
+{"passed":true,"name":"A-empty-cancel","choice":"cancel","dialogs":1,"expected":"","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":true,"backupFolders":4}
+{"passed":true,"name":"A-empty-confirm","choice":"local","dialogs":1,"expected":"","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":4}
+{"passed":true,"name":"B-pull-deletion","choice":null,"dialogs":0,"expected":"","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":3}
+{"passed":true,"name":"B-add-after-delete","choice":null,"dialogs":0,"expected":"restored","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":3}
+{"passed":true,"name":"A-pull-after-delete","choice":null,"dialogs":0,"expected":"restored","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"A-offline-quiet","choice":null,"dialogs":0,"expected":"quiet-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"B-push-quiet","choice":null,"dialogs":0,"expected":"quiet-b","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":3}
+{"passed":true,"name":"A-background-conflict","choice":null,"dialogs":0,"expected":"quiet-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"A-review-quiet","choice":"local","dialogs":1,"expected":"quiet-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"B-final-pull","choice":null,"dialogs":0,"expected":"quiet-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":4}
+{"passed":true,"name":"A-repeat","choice":null,"dialogs":0,"expected":"quiet-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"B-repeat","choice":null,"dialogs":0,"expected":"quiet-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":4}
+PASS 30 save scenarios
+{"passed":true,"name":"A-ui-offline","choice":null,"dialogs":0,"expected":"ui-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"B-ui-change","choice":null,"dialogs":0,"expected":"ui-b","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":4}
+{"passed":true,"name":"A-ui-background","choice":null,"dialogs":0,"expected":"ui-a","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"A-ui-choose-saves","choice":"cloud","dialogs":1,"expected":"ui-b","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":6}
+{"passed":true,"name":"B-ui-converge","choice":null,"dialogs":0,"expected":"ui-b","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":4}
+{"passed":true,"name":"A-interrupted-upload","choice":null,"dialogs":0,"expected":"interrupted-upload","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":true,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":6}
+{"passed":true,"name":"B-before-upload-resumes","choice":null,"dialogs":0,"expected":"ui-b","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":4}
+{"passed":true,"name":"A-resume-upload","choice":null,"dialogs":0,"expected":"interrupted-upload","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":6}
+{"passed":true,"name":"B-pull-resumed-upload","choice":null,"dialogs":0,"expected":"interrupted-upload","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"B-final-small","choice":null,"dialogs":0,"expected":"finished","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":false,"checkpointPreserved":false,"backupFolders":5}
+{"passed":true,"name":"A-final-small","choice":null,"dialogs":0,"expected":"finished","playtime":16,"sessions":2,"filesVerified":true,"stoppedTransfer":false,"backupBytesVerified":true,"checkpointPreserved":false,"backupFolders":7}
+PASS 11 save scenarios

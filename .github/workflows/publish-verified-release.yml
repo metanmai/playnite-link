@@ -1,0 +1,54 @@
+name: Publish verified distribution
+on:
+  push:
+    branches: [main]
+    paths: [distribution/release.json]
+permissions:
+  contents: write
+concurrency:
+  group: publish-verified-distribution
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish, verify downloads, then remove superseded releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://raw.githubusercontent.com/${GH_REPO}/${GITHUB_SHA}/distribution"
+          curl --fail --location --retry 3 "$base/release.json" -o release.json
+          tag=$(jq -r .tag release.json)
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${tag#v}"
+          package="PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_${version//./_}.pext"
+          source="PlayniteLink-${version}-source.zip"
+          for file in "$package" "$source" SHA256SUMS.txt release-notes.md; do
+            curl --fail --location --retry 3 "$base/$file" -o "$file"
+          done
+          [[ $(wc -l < SHA256SUMS.txt) -eq 2 ]]
+          sha256sum --check --strict SHA256SUMS.txt
+          [[ $(sha256sum "$package" | cut -d' ' -f1) == $(jq -r .packageSha256 release.json) ]]
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release already exists; verifying its assets before cleanup."
+          else
+            gh release create "$tag" "$package" "$source" SHA256SUMS.txt --target "$GITHUB_SHA" --title "Playnite Link $version — audited save recovery and cloud sync" --notes-file release-notes.md --latest
+          fi
+          mkdir verified
+          gh release download "$tag" --dir verified --pattern "$package" --pattern "$source" --pattern SHA256SUMS.txt
+          (cd verified && sha256sum --check --strict SHA256SUMS.txt)
+          cmp "$package" "verified/$package"
+          cmp "$source" "verified/$source"
+          [[ $(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name) == "$tag" ]]
+          while IFS=$'\t' read -r id old_tag; do
+            [[ "$id" =~ ^[0-9]+$ && "$old_tag" != "$tag" ]]
+            if gh api "repos/$GH_REPO/releases/$id" > old-release.json 2>/dev/null; then
+              [[ $(jq -r .tag_name old-release.json) == "$old_tag" ]]
+              gh api --method DELETE "repos/$GH_REPO/releases/$id"
+              echo "Removed release $old_tag"
+            fi
+          done < <(jq -r '.superseded[] | [.id,.tag] | @tsv' release.json)
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | {tag: .tag_name, draft: .draft, url: .html_url}'

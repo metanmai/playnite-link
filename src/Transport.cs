@@ -33,8 +33,9 @@ namespace PlaytimeRclone
         private readonly string exe, config, root,pattern;
         private readonly int limitSeconds,bandwidthKiB;
         private readonly Func<bool> cancelled;
-        public RcloneTransport(string exe, string config, string root, string area = "playnite-link-v1/ledger/objects",string pattern="*.json",int limitSeconds=105,int bandwidthKiB=0,Func<bool> cancelled=null)
-        { this.exe = exe; this.config = config; this.root = root.TrimEnd('/', '\\') + "/" + area;this.pattern=pattern;this.limitSeconds=limitSeconds;this.bandwidthKiB=bandwidthKiB;this.cancelled=cancelled; }
+        private readonly Action<MetadataTransferProgress> progress;
+        public RcloneTransport(string exe, string config, string root, string area = "playnite-link-v1/ledger/objects",string pattern="*.json",int limitSeconds=105,int bandwidthKiB=0,Func<bool> cancelled=null,Action<MetadataTransferProgress> progress=null)
+        { this.progress=progress;this.exe = exe; this.config = config; this.root = root.TrimEnd('/', '\\') + "/" + area;this.pattern=pattern;this.limitSeconds=limitSeconds;this.bandwidthKiB=bandwidthKiB;this.cancelled=cancelled; }
         // Windows argv quoting; never a shell, and no arbitrary extra flags.
         public static string Quote(string value)
         {
@@ -51,8 +52,12 @@ namespace PlaytimeRclone
         private void Copy(string source, string destination, bool upload,string fileList=null,string[] metadata=null)
         {
             if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");
+            var metadataDownload=!upload&&metadata!=null;
+            if(metadataDownload)MetadataCache.Validate(destination);
+            var initial=metadataDownload?MetadataCache.Count(destination):0;
             var args = new List<string> { "copy", source, destination, "--immutable",
-                "--retries", "3", "--low-level-retries", "4", "--retries-sleep", "10s", "--tpslimit", "4", "--tpslimit-burst", "4", "--contimeout", "10s", "--timeout", "60s", "--stats", "0", "--log-level", "ERROR" };
+                "--retries", metadataDownload?"1":"3", "--low-level-retries", metadataDownload?"2":"4", "--retries-sleep", metadataDownload?"1s":"10s", "--tpslimit", metadataDownload?"8":"4", "--tpslimit-burst", metadataDownload?"8":"4", "--contimeout", metadataDownload?"5s":"10s", "--timeout", metadataDownload?"15s":"60s", "--stats", "0", "--log-level", "ERROR" };
+            if(metadataDownload){args.Add("--fast-list");args.Add("--ignore-existing");}
             if(pattern=="*.blob"){args.Add("--ignore-existing");}else args.Add("--checksum");
             if(fileList!=null){args.Add("--files-from");args.Add(fileList);args.Add("--no-traverse");}
             else if(metadata!=null){foreach(var area in metadata){args.Add("--include");args.Add("/"+area+"/objects/*.json");}args.Add("--max-depth");args.Add("3");}
@@ -66,10 +71,14 @@ namespace PlaytimeRclone
             using (var process = Process.Start(info))
             {
                 var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-                var watch=Stopwatch.StartNew();
+                var watch=Stopwatch.StartNew();var guard=new TransferWatchdog(0,initial);double nextProgress=0;string interrupted=null;bool stopped=false;int cached=initial;
                 while(!process.WaitForExit(250))
-                    if((cancelled!=null&&cancelled())||watch.Elapsed.TotalSeconds>limitSeconds)
-                    {process.Kill();process.WaitForExit();if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");throw new IOException("Cloud transfer timed out. Local changes remain queued.");}
+                {
+                    if(cancelled!=null&&cancelled()){stopped=true;break;}
+                    if(metadataDownload){if(watch.Elapsed.TotalSeconds>=nextProgress){cached=MetadataCache.Count(destination);if(progress!=null)progress(new MetadataTransferProgress{Cached=cached,Downloaded=Math.Max(0,cached-initial),ElapsedSeconds=watch.Elapsed.TotalSeconds});interrupted=guard.Observe(watch.Elapsed.TotalSeconds,cached);nextProgress=watch.Elapsed.TotalSeconds+2;}if(interrupted!=null)break;}
+                    else if(watch.Elapsed.TotalSeconds>limitSeconds){interrupted="The cloud transfer stopped responding. Local changes remain queued.";break;}
+                }
+                if(stopped||interrupted!=null){process.Kill();process.WaitForExit();System.Threading.Tasks.Task.WaitAll(stdout,stderr);if(FailureDiagnostic!=null)FailureDiagnostic(stderr.Result);if(stopped)throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");throw new CloudTransferException(interrupted);}
                 System.Threading.Tasks.Task.WaitAll(stdout, stderr);
                 if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");
                 // rclone exit 3 = directory missing, 9 = no transfer. Other errors always fail closed.
@@ -77,14 +86,15 @@ namespace PlaytimeRclone
                 {
                     if(FailureDiagnostic!=null)FailureDiagnostic(stderr.Result);
                     if(stderr.Result.IndexOf("quota",StringComparison.OrdinalIgnoreCase)>=0||stderr.Result.IndexOf("rate limit",StringComparison.OrdinalIgnoreCase)>=0)
-                        throw new IOException("The cloud provider is throttling this Rclone connection. Local changes are queued; retry after the provider's quota window resets.");
+                        throw new CloudTransferException("The cloud provider is throttling this Rclone connection. Local changes are queued; retry after the provider's quota window resets.");
+                    if(process.ExitCode==5)throw new CloudTransferException("The cloud connection is temporarily unavailable. Downloaded records and local changes are kept for retry.");
                     throw new IOException("Rclone failed (exit " + process.ExitCode + "). Check remote access/configuration. Local sessions remain queued.");
                 }
             }
         }
         public void Pull(string destination) { Copy(root, destination, false); }
         public void PullMetadata(string destination)
-        {Copy(root,destination,false,null,new[]{"devices","ledger","activity","revisions"});}
+        {Copy(root,destination,false,null,MetadataCache.Areas);if(progress!=null)progress(new MetadataTransferProgress{Cached=MetadataCache.Count(destination)}); }
         public void Push(string source) { Copy(source, root, true); }
         public void PullFiles(string destination,IEnumerable<string> names)
         {
@@ -97,6 +107,15 @@ namespace PlaytimeRclone
         {
             var list=names.Distinct().ToList();if(list.Count==0)return;
             if(list.Any(n=>!Regex.IsMatch(n,"^[a-f0-9]{64}\\.(blob|json)$")))throw new InvalidDataException("Unsafe immutable upload path.");
+            // Pending blobs can have been cached before a restart. Verify their
+            // content addresses before an immutable upload can spread corruption.
+            var blobNames=list.Where(n=>n.EndsWith(".blob",StringComparison.Ordinal)).ToList();
+            if(blobNames.Count>0)
+            {
+                var store=new BlobStore(source){CancelRequested=cancelled};
+                foreach(var name in blobNames)
+                    store.CopyVerified(new BlobReference{Hash=Path.GetFileNameWithoutExtension(name),Length=new FileInfo(Path.Combine(source,name)).Length}.ToString(),Stream.Null);
+            }
             var path=Path.Combine(source,Guid.NewGuid().ToString("N")+".files.tmp");
             try{File.WriteAllLines(path,list,new UTF8Encoding(false));Copy(source,root,true,path);}finally{if(File.Exists(path))File.Delete(path);}
         }
@@ -110,7 +129,7 @@ namespace PlaytimeRclone
             {
                 if (new FileInfo(path).Length > 16384) throw new InvalidDataException("Oversized cloud record.");
                 var raw = File.ReadAllText(path);
-                var entry = JsonConvert.DeserializeObject<Entry>(raw, new JsonSerializerSettings { MissingMemberHandling = MissingMemberHandling.Error });
+                var entry = JsonSafety.Deserialize<Entry>(raw, new JsonSerializerSettings { MissingMemberHandling = MissingMemberHandling.Error });
                 if (entry == null) throw new InvalidDataException("Null cloud record.");
                 entry.Validate();
                 if (Path.GetFileNameWithoutExtension(path) != entry.Hash()) throw new InvalidDataException("Cloud record hash mismatch. Sync stopped.");

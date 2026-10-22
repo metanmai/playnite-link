@@ -35,5 +35,4 @@ All measured launches and warm metadata checks are below the 10,000 ms target. A
 
 **201 checks passed.** Save staging is tested with a launch-time veto after remote files have staged: local contents remain unchanged, no backup/swap occurs, and the temporary stage is cleaned up. The actual Desktop and Fullscreen save host tests cover cloud/local conflict choices, canceled launches, backups, preferences, stable UI navigation and no global progress dialogs.
 
-The 0.5 session/online HLTB acceptance is retained in [the release notes](../CHANGELOG.md). This change does not alter online HLTB progress semantics. Physical ROG Ally hardware is not claimed; the two actual Windows profiles exercise Desktop/Fullscreen modes. Save directories, addon sharing and online HLTB remain explicit local configuration choices.
-
+The 0.5 session/online HLTB acceptance is retained in [the prior report](ACCEPTANCE-0.5.md). This change does not alter online HLTB progress semantics. Physical ROG Ally hardware is not claimed; the two actual Windows profiles exercise Desktop/Fullscreen modes. Save directories, addon sharing and online HLTB remain explicit local configuration choices.

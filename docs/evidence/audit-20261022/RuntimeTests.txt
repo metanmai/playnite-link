@@ -1,0 +1,5 @@
+PASS corrupt download rejected before extraction
+PASS archive paths cannot escape destination
+PASS official pinned runtime downloaded, verified and executed
+PASS subsequent setup reuses installed runtime
+RESULT 4 passed, 0 failed

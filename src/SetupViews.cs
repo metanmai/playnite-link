@@ -22,10 +22,10 @@ namespace PlaytimeRclone
         private List<SetupChange> setupChanges=new List<SetupChange>();
         private string setupStatus="Add-on sync is off on this device.";
         private void InitializeSetup()
-        {setup=new SetupProfile(Root,PlayniteApi.Paths.ConfigurationPath,blobs);var error=Path.Combine(setup.DirectoryPath,"apply-error.txt");if(File.Exists(error))setupStatus="The last add-on update was rolled back: "+File.ReadAllText(error);}
+        {setup=new SetupProfile(Root,PlayniteApi.Paths.ConfigurationPath,blobs);var error=Path.Combine(setup.DirectoryPath,"apply-error.txt");if(File.Exists(error))setupStatus="The last add-on update did not complete: "+File.ReadAllText(error);}
         private void SyncSetup()
         {
-            if(setup==null||!setup.Options.Enabled)return;
+            if(setup==null||!setup.Options.Enabled||setup.RecoveryRequired)return;
             if(DateTime.UtcNow>=nextSetupCapture){setup.Capture(repository.Snapshot().Device);nextSetupCapture=DateTime.UtcNow.AddMinutes(5);}
             var cfg=config;var remote=new RcloneTransport(cfg.RcloneExe,cfg.ConfigFile,cfg.RemoteFolder,"playnite-link-v1/setup/objects",cancelled:()=>closing||TransferStopped);
             var incoming=Path.Combine(setup.DirectoryPath,"incoming");Directory.CreateDirectory(incoming);remote.Pull(incoming);setup.History.Import(incoming);setup.MergeEquivalent(repository.Snapshot().Device);
@@ -87,8 +87,13 @@ namespace PlaytimeRclone
         }
         private void BuildSetup(Window window)
         {
-            var panel=Page(window,"Extensions and themes","Optional, peer-to-peer installation sync through your own cloud. Each device keeps its active theme and all settings.","Add-ons");
+            var panel=Page(window,"Extensions and themes","","Add-ons");
             if(setup==null){Label(panel,"Add-on synchronization is unavailable. Check the extension log.");return;}
+            if(setup.RecoveryRequired)
+            {
+                Label(panel,"An add-on installation was interrupted. Restart to recover the previous installations. Completed installations with a durable receipt are retained. Backups and settings are preserved.");
+                Button(panel,"Recover interrupted installation and restart",()=>RecoverSetup());return;
+            }
             var controls=Card(panel,"Sync on this device","");
             setupStatusText=Label(controls,setupStatus);
             var enabled=Toggle(controls,"Share extension and theme installations",setup.Options.Enabled);
@@ -97,9 +102,9 @@ namespace PlaytimeRclone
                 setupStatus=setup.Options.Enabled?"Enabled. Check for changes to publish and discover add-ons.":"Add-on sync is off on this device.";
                 RebuildSetupPage();
             };
-            Label(controls,"This syncs add-on files only. Playnite settings, extension settings, sign-ins, launch mode and startup preferences stay on each device. Built-in add-ons and Playnite Link itself are excluded.",13,true);
+            Label(controls,"Settings, sign-ins and active theme stay on each device.",13,true);
             var actions=Actions(controls);setupCheckButton=Button(actions,setupChecking?"Checking…":"Check for changes",RefreshSetup);setupCheckButton.IsEnabled=setup.Options.Enabled&&!setupChecking;
-            if(!setup.Options.Enabled){Label(panel,"Enable sharing to discover installed add-ons. Nothing is uploaded while this is off.");return;}
+            if(!setup.Options.Enabled){Label(panel,"Sharing is off.");return;}
             var choices=new Dictionary<string,ComboBox>();
             foreach(var change in setupChanges)
             {
@@ -122,7 +127,7 @@ namespace PlaytimeRclone
             }
             Details(panel,"Device-only add-ons",exclusions);
             var footer=Actions(Footer(window));var apply=Button(footer,"Apply selected changes and restart",()=>ApplySetup(choices));StyleAction(apply,true);apply.IsEnabled=choices.Count>0&&syncing==0;
-            Label(panel,"Changes are staged and verified first. Replaced installations are backed up; add-on settings and data are retained. Switching your active theme never changes another device's active theme.",13,true);
+            
         }
         private async void ApplySetup(Dictionary<string,ComboBox> pickers)
         {
@@ -149,5 +154,22 @@ namespace PlaytimeRclone
             catch(Exception ex){setupRestartPending=false;NotifyError(ex);}
         }
         private void InterlockedSync(int value){System.Threading.Interlocked.Exchange(ref syncing,value);}
+        private async void RecoverSetup()
+        {
+            if(setupRestartPending||!EnsureAccess())return;
+            if(PlayniteApi.Database.Games.Any(g=>g.IsRunning||g.IsLaunching)){PlayniteApi.Dialogs.ShowMessage("Stop running games before recovering add-ons.","Playnite Link");return;}
+            setupRestartPending=true;
+            try
+            {
+                await syncGate.WaitAsync();syncGate.Release();
+                var script=Path.Combine(Path.GetDirectoryName(typeof(PlaytimePlugin).Assembly.Location),"SetupApply.ps1");
+                if(!File.Exists(script))throw new FileNotFoundException("The setup recovery helper is missing.");
+                var process=Process.GetCurrentProcess();var exe=process.MainModule.FileName;
+                var arguments="-NoProfile -ExecutionPolicy Bypass -File "+RcloneTransport.Quote(script)+" -Plan "+RcloneTransport.Quote(Path.Combine(setup.DirectoryPath,"pending.json"))+" -RecoverOnly -ParentId "+process.Id+" -RestartExe "+RcloneTransport.Quote(exe)+" -RestartProfile "+RcloneTransport.Quote(PlayniteApi.Paths.ConfigurationPath);
+                if(Environment.GetCommandLineArgs().Contains("--masterinstance"))arguments+=" -RestartMaster";
+                Process.Start(new ProcessStartInfo("powershell.exe",arguments){UseShellExecute=false,CreateNoWindow=true});Application.Current.Shutdown();
+            }
+            catch(Exception ex){setupRestartPending=false;NotifyError(ex);}
+        }
     }
 }

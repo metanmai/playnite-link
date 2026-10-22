@@ -22,6 +22,32 @@ namespace PlaytimeRclone
     }
     public sealed class BlobStore
     {
+        private static readonly object restoreGate=new object();
+        // Test-only fault observer; production never installs one.
+        internal static Action<string> RestoreBoundary=null;
+        private static void Boundary(string name){var observer=RestoreBoundary;if(observer!=null)observer(name);}
+        public static void RecoverRestore(string folder)
+        {
+            lock(restoreGate)
+            {
+                var root=SaveFiles.Root(folder);var journal=root+".pl-restore";
+                SaveFiles.CheckAncestors(journal);
+                if(!File.Exists(journal))return;
+                if(new FileInfo(journal).Length>80)throw new IOException("Invalid save recovery journal; launch blocked to preserve saves.");
+                var record=File.ReadAllText(journal).Split('|');
+                if(record.Length!=2||!Regex.IsMatch(record[0],"^[a-f0-9]{32}$")||(record[1]!="0"&&record[1]!="1"))throw new IOException("Invalid save recovery journal; launch blocked to preserve saves.");
+                var backup=root+".pl-backup-"+record[0];SaveFiles.CheckAncestors(backup);
+                if(File.Exists(root))throw new IOException("Save recovery destination is a file; original backup was preserved.");
+                if(!Directory.Exists(root)&&record[1]=="1")
+                {
+                    if(!Directory.Exists(backup))throw new IOException("Save recovery needs the original backup; launch blocked.");
+                    Directory.Move(backup,root);
+                }
+                // An existing root is either the untouched original or the fully staged
+                // replacement. Never overwrite it; retain all sibling backups/stages.
+                File.Delete(journal);
+            }
+        }
         public readonly string DirectoryPath;
         public Action<IEnumerable<string>> Fetch;
         public Func<bool> CancelRequested;
@@ -46,8 +72,9 @@ namespace PlaytimeRclone
                 var existing=PathFor(existingHash);
                 if(File.Exists(existing))
                 {
-                    if(new FileInfo(existing).Length!=count)throw new InvalidDataException("Existing blob length mismatch.");
-                    return new BlobReference{Hash=existingHash,Length=count};
+                    var reference=new BlobReference{Hash=existingHash,Length=count};
+                    CopyVerified(reference.ToString(),Stream.Null);
+                    return reference;
                 }
                 input.Position=start;
             }
@@ -63,8 +90,8 @@ namespace PlaytimeRclone
                 }
                 var destination=PathFor(hash);
                 if(File.Exists(destination))
-                { if(new FileInfo(destination).Length!=length)throw new InvalidDataException("Existing blob length mismatch."); }
-                else {try{File.Move(temp,destination);}catch(IOException){if(!File.Exists(destination))throw;}}
+                { CopyVerified(new BlobReference{Hash=hash,Length=length}.ToString(),Stream.Null); }
+                else {try{File.Move(temp,destination);}catch(IOException){if(!File.Exists(destination))throw;CopyVerified(new BlobReference{Hash=hash,Length=length}.ToString(),Stream.Null);}}
                 return new BlobReference{Hash=hash,Length=length};
             }
             finally{if(File.Exists(temp))File.Delete(temp);}
@@ -73,6 +100,7 @@ namespace PlaytimeRclone
         public long CaptureCount{get{return System.Threading.Interlocked.Read(ref captureCount);}}
         public SortedDictionary<string,string> Capture(string folder)
         {
+            RecoverRestore(folder);
             System.Threading.Interlocked.Increment(ref captureCount);
             var root=SaveFiles.Root(folder);var data=new SortedDictionary<string,string>(StringComparer.Ordinal);
             if(Directory.Exists(root))
@@ -132,11 +160,22 @@ namespace PlaytimeRclone
                     var path=Path.Combine(stage,pair.Key.Replace('/',Path.DirectorySeparatorChar));Directory.CreateDirectory(Path.GetDirectoryName(path));
                     using(var output=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None,131072,FileOptions.SequentialScan)){CopyVerified(pair.Value,output);output.Flush(true);}
                 }
+                Boundary("staged");
                 if(beforeReplace!=null)beforeReplace();
                 SaveFiles.CheckAncestors(root);
                 if(Revision.ContentHashOf(Capture(root))!=expected)throw new IOException("Local saves changed while restore was staging.");
-                if(Directory.Exists(root))Directory.Move(root,backup);
-                try{Directory.Move(stage,root);}catch{if(Directory.Exists(backup)&&!Directory.Exists(root))Directory.Move(backup,root);throw;}
+                lock(restoreGate)
+                {
+                    var journal=root+".pl-restore";SaveFiles.CheckAncestors(journal);
+                    Atomic.Write(journal,id+"|"+(Directory.Exists(root)?"1":"0"));
+                    Boundary("journal");
+                    if(Directory.Exists(root))Directory.Move(root,backup);
+                    Boundary("backup");
+                    try{Directory.Move(stage,root);}catch{RecoverRestore(root);throw;}
+                    Boundary("installed");
+                    File.Delete(journal);
+                    Boundary("committed");
+                }
                 return Directory.Exists(backup)?backup:null;
             }
             finally{if(Directory.Exists(stage))Directory.Delete(stage,true);}

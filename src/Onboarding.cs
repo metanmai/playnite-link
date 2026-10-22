@@ -11,20 +11,20 @@ using Playnite.SDK.Models;
 
 namespace PlaytimeRclone
 {
-    public sealed class OnboardingOptions {public bool AutomaticGames=true;public bool OnlineHltb;public bool SetupComplete;public int SetupStep;public bool SyncPaused;}
+    public sealed class OnboardingOptions {public bool AutomaticGames;public bool OnlineHltb;public bool SetupComplete;public int SetupStep;public bool SyncPaused;}
     public sealed partial class PlaytimePlugin
     {
         private OnboardingOptions onboarding;
         private void InitializeOnboarding(bool fresh)
         {
             var path=Path.Combine(Root,"onboarding.json");
-            onboarding=File.Exists(path)?JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(path)):new OnboardingOptions{AutomaticGames=fresh};
+            onboarding=File.Exists(path)?JsonSafety.Deserialize<OnboardingOptions>(File.ReadAllText(path)):new OnboardingOptions{AutomaticGames=false};
             if(onboarding==null)throw new InvalidDataException("Invalid onboarding preferences.");
             if(onboarding.SetupStep<0||onboarding.SetupStep>4)onboarding.SetupStep=0;
             // Older connected profiles keep their setup. Fresh installs always get the walkthrough.
             var connection=Path.Combine(Root,"rclone-settings.json");
-            if(File.Exists(connection)&&(!File.Exists(path)||Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path))["SetupComplete"]==null))
-            {var previous=JsonConvert.DeserializeObject<SyncConfig>(File.ReadAllText(connection));onboarding.SetupComplete=previous!=null&&!String.IsNullOrWhiteSpace(previous.RemoteFolder);}
+            if(File.Exists(connection)&&(!File.Exists(path)||JsonSafety.Object(File.ReadAllText(path))["SetupComplete"]==null))
+            {var previous=JsonSafety.Deserialize<SyncConfig>(File.ReadAllText(connection));onboarding.SetupComplete=previous!=null&&!String.IsNullOrWhiteSpace(previous.RemoteFolder);}
 
         }
         private void SaveOnboarding(){Atomic.Write(Path.Combine(Root,"onboarding.json"),JsonConvert.SerializeObject(onboarding));}
@@ -50,6 +50,7 @@ namespace PlaytimeRclone
         private sealed class StorageChoice {public string Remote {get;set;} public string ConfigFile {get;set;} public string Label {get;set;}}
         private async Task ConnectStorageAsync()
         {
+            if(vaultSwitchPending)throw new InvalidOperationException("Restart Playnite to finish switching vaults before connecting.");
             connectionCancelled=false;
             if(!EnsureAccess())return;
             var exe=config.RcloneExe;
@@ -66,10 +67,10 @@ namespace PlaytimeRclone
             choices.DisplayMemberPath="Label";
             var connect=Button(panel,"Use this connection",()=>{selected=choices.SelectedItem as StorageChoice;if(selected!=null)window.Close();});connect.IsEnabled=false;
             Button(panel,"Sign in to a new cloud account",()=>{signIn=true;window.Close();});
-            Label(panel,"Manual games need a shared link name. Save folders are selected locally when no reliable location is known. Extension/theme sharing remains a separate opt-in.",13,true);
+            Label(panel,"Select an existing cloud game, or add it once with a display name. Save folders are selected locally when no reliable location is known. Extension/theme sharing remains a separate opt-in.",13,true);
             var load=Task.Run(()=>{
                 var files=new List<string>{config.ConfigFile??""};
-                files.AddRange(Directory.GetFiles(Root,"personal-rclone-*.conf").Where(file=>System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(file),"(?m)^token\\s*=")));
+                files.AddRange(VaultProfiles.List(BaseRoot).Select(p=>p.Directory).Concat(new[]{BaseRoot}).Distinct(StringComparer.OrdinalIgnoreCase).SelectMany(p=>Directory.GetFiles(p,"personal-rclone-*.conf")).Where(file=>System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(file),"(?m)^token\\s*=")));
                 var found=new List<StorageChoice>();
                 foreach(var file in files.Distinct(StringComparer.OrdinalIgnoreCase))
                 {

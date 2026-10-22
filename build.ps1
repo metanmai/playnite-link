@@ -1,7 +1,7 @@
-param([string]$PlaynitePath = "$env:LOCALAPPDATA/Playnite")
+param([string]$PlaynitePath = "$env:LOCALAPPDATA/Playnite", [string]$BuildDirectory = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot.Replace('/', '\')
-$buildDir = Join-Path $projectRoot 'build'
+$buildDir = if ($BuildDirectory) { [IO.Path]::GetFullPath($BuildDirectory) } else { Join-Path $projectRoot 'build' }
 New-Item -ItemType Directory -Force $buildDir | Out-Null
 $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $references = @("/r:$PlaynitePath/Playnite.SDK.dll", "/r:$PlaynitePath/Newtonsoft.Json.dll", '/r:System.Core.dll', '/r:System.dll', '/r:System.Xaml.dll','/r:System.Security.dll','/r:System.IO.Compression.dll')
@@ -36,3 +36,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Activity integration test compilation failed' 
 if ($LASTEXITCODE -ne 0) { throw 'HLTB integration test compilation failed' }
 & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/RuntimeTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/RuntimeTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Runtime test compilation failed' }
+
+foreach($test in @('MetadataTransferTests','MetadataCloudProbe','AuditTests','CrashRecoveryTests','CloudEnrollmentProbe')){
+ & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/$test.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot ('tests/'+$test+'.cs'))
+ if($LASTEXITCODE -ne 0){throw 'Metadata test compilation failed'}
+}

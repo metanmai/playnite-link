@@ -39,7 +39,7 @@ namespace PlaytimeRclone
         public ActivityBridge(string directory)
         {
             path=Path.Combine(directory,"activity-bindings.json");
-            state=File.Exists(path)?JsonConvert.DeserializeObject<ActivityBridgeState>(File.ReadAllText(path)):new ActivityBridgeState();
+            state=File.Exists(path)?JsonSafety.Deserialize<ActivityBridgeState>(File.ReadAllText(path)):new ActivityBridgeState();
             if(state==null||state.Version!=1||state.Games==null)throw new InvalidDataException("Invalid activity integration state; restore its backup before continuing.");
             serialized=JsonConvert.SerializeObject(state,Formatting.Indented);
         }
