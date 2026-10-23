@@ -1,12 +1,12 @@
-# Playnite Link 0.6.2
+# Playnite Link 0.6.3
 
 Personal-cloud save, playtime and preference sync for Playnite. **Your storage account owns the vault. There is no Playnite Link account server, hosted user directory, subscription, or central save database.**
 
-This is an independent extension, not an official Playnite product. Version 0.6.1 targets Windows 10/11, Playnite 10 and .NET Framework 4.8. It incorporates Jurangren's Save Manager 2.0.3 backup core under AGPL-3.0. Corresponding source accompanies the package. An existing Rclone installation is reused, or an official pinned, checksum-verified runtime is prepared in the background.
+This is an independent extension, not an official Playnite product. Version 0.6.3 targets Windows 10/11, Playnite 10 and .NET Framework 4.8. It incorporates Jurangren's Save Manager 2.0.3 backup core under AGPL-3.0. Corresponding source accompanies the package. An existing Rclone installation is reused, or an official pinned, checksum-verified runtime is prepared in the background.
 
 ## Install and connect
 
-1. Open `release/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext` in Playnite and restart when prompted. Upgrade every device to 0.6.0 before using multiple save sources.
+1. Open `release/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_3.pext` in Playnite and restart when prompted. Upgrade every device to 0.6.0 before using multiple save sources.
 2. Open **main menu → Playnite Link → Personal cloud account & settings**.
 3. Select **Connect**, choose an existing authorized storage connection, and connect. The default vault folder is **PlayniteLink**. Existing Rclone and Save Manager configurations are discovered automatically. Advanced configuration remains available for a different vault path.
 4. New connections support Google Drive, Dropbox, OneDrive, pCloud, WebDAV and Cloudflare R2. Browser providers use their sign-in pages; WebDAV and R2 ask for endpoint/access credentials locally. Google Drive requires your own Desktop OAuth client JSON to avoid Rclone's shared project quota. R2 vault destinations include the bucket name. New connections use a unique local configuration file. Credentials are never shared with other devices.

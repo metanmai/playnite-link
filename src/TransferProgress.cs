@@ -11,11 +11,12 @@ namespace PlaytimeRclone
  }
  public static class MetadataCache
  {
-  public static readonly string[] Areas={"devices","ledger","activity","revisions","receipts","backups"};
+  public static readonly string[] Areas={"devices","ledger","activity","revisions","receipts","backups","achievements"};
   public static int Count(string root){return Areas.Sum(a=>{var p=Path.Combine(root,a,"objects");return Directory.Exists(p)?Directory.GetFiles(p,"*.json").Length:0;});}
   static void ValidateObject(string file,string area)
   {
-var length=new FileInfo(file).Length;if(length>(area=="devices"?16L*1024*1024:area=="revisions"?64L*1024*1024:area=="backups"?1024*1024:16384))throw new InvalidDataException("Oversized cached record.");var raw=File.ReadAllText(file);string hash;var options=new JsonSerializerSettings{MissingMemberHandling=MissingMemberHandling.Error};
+var length=new FileInfo(file).Length;if(length>(area=="devices"?16L*1024*1024:area=="revisions"?64L*1024*1024:area=="backups"?1024*1024:area=="achievements"?65536:16384))throw new InvalidDataException("Oversized cached record.");var raw=File.ReadAllText(file);string hash;var options=new JsonSerializerSettings{MissingMemberHandling=MissingMemberHandling.Error};
+     if(area=="achievements"){AchievementStore.Read(file);return;}
      if(area=="devices"){var value=JsonSafety.Deserialize<DeviceEvent>(raw,options);if(value==null)throw new InvalidDataException();value.Validate();hash=value.Hash();}
      else if(area=="revisions"){var value=JsonSafety.Deserialize<Revision>(raw,options);if(value==null)throw new InvalidDataException();value.Validate();hash=value.Hash();}
      else if(area=="receipts"){var value=JsonSafety.Deserialize<GameSyncReceipt>(raw,options);if(value==null)throw new InvalidDataException();value.Validate();hash=value.Hash();}

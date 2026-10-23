@@ -1,0 +1,13 @@
+# Achievement synchronization
+
+Achievements are part of normal startup, post-session, manual and idle game sync. Link captures cached current-user records from Playnite Achievements and SuccessStory through their public cache APIs, and sends allowlisted immutable records to the personal vault's achievements/objects area. Credentials, account settings, friend data, icon files and complete add-on databases are not synchronized.
+
+Receiving devices can view achievements in the game's Playnite Link → Achievements window without either source add-on installed. Compatible existing rows in an installed achievement add-on are updated through its own database API. Unknown schemas are retained in Link; they are not inserted into an add-on's provider catalog. A source provider/add-on is still needed to discover new achievements. Link does not independently implement Steam/Xbox/PSN provider authentication, and never awards unlocks to platform services.
+
+Use the same personal account and vault across participating devices. Game identities and provider sets remain separate. SuccessStory and Playnite Achievements are separate sets because their identifiers are not guaranteed interchangeable. Duplicate titles are not used as achievement identities. Rows lacking stable API identifiers are skipped. An observed unlock is retained despite a stale locked report, the earliest known unlock date is preserved, and compatible partial progress merges using the maximum. Unknown unlock dates remain unknown. Different progress denominators are preserved as raw observations without fabricating a combined value. There is no shared achievement reset operation in this release.
+
+Sync achievements is enabled by default and can be disabled in Overview. Existing older clients continue syncing their supported data; they need 0.6.3 to exchange achievements. Achievement transfer failures remain queued while session/save synchronization continues, and the overall result requests attention. Local data survives restart and upload retries. There is no migration wizard.
+
+Validation includes offline two-device merge, restart, duplicate/stale delivery, provider/game separation, timestamp normalization, denominator conflicts, malformed/forged records, Playnite Achievements and SuccessStory adapter fixtures, and a real Rclone transfer. Actual Playnite Desktop/Fullscreen tests verify achievement upload and the native view with no achievement add-on installed. These tests do not certify provider-specific online refresh behavior or a physical Ally run.
+
+Interoperability references: https://github.com/justin-delano/PlayniteAchievements and https://github.com/Lacro59/playnite-successstory-plugin . No add-on binaries are bundled.

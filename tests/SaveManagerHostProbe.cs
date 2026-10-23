@@ -104,6 +104,10 @@ public sealed class HostProbe:GenericPlugin
             Check(Directory.GetFiles(remote,"*.json").Any(path=>File.ReadAllText(path).Contains(recorded.Id)),"Locked save blocked session upload");
         }
         await Until(()=>!subject.IsSyncRunning);
+        var achievements=new AchievementStore(Path.Combine(PlayniteApi.Paths.ExtensionsDataPath,"8ca18482-3ebe-4bf7-b229-a259b2094767"));
+        var achievement=new AchievementRecord{Game=key,Scope=Identity.Hash("host-platform"),Id="TEST_UNLOCK",Device=repo.Snapshot().Device,Name="Cross-device achievement",Description="Fixture",Unlocked=true,UnlockedUtc="2026-10-23T01:00:00Z"};achievements.Observe(achievement);
+        await subject.SyncPersonalAsync(true,null);Check(File.Exists(Path.Combine(root,"Cloud","personal","playnite-link-v1","achievements","objects",achievement.Hash()+".json")),"Achievement did not upload with game sync");
+        await Open("ShowAchievements",new object[]{game},()=>{Check(Elements<TextBlock>(window).Any(t=>t.Text.Contains("1 / 1 unlocked")),"Native achievement summary missing");Check(Elements<ListBox>(window).Any(l=>l.Items.Cast<object>().Any(i=>i.ToString().Contains("Cross-device achievement"))),"Remote achievement absent without add-ons");Capture("achievements");});
         await Open("ShowSaveBackups",new object[0],()=>{Check(!Elements<TextBlock>(window).Any(t=>t.Text.Contains("migration")||t.Text.Contains("retire")),"Migration workflow is still exposed");});
         var bundle=Path.Combine(root,"all-backups.zip");Call("ExportSaveBundle",bundle);Check(File.Exists(bundle),"Global export missing");
         using(var file=File.OpenRead(bundle))using(var zip=new System.IO.Compression.ZipArchive(file,System.IO.Compression.ZipArchiveMode.Read)){var manifest=SaveMigrationFiles.BundleManifest(zip);Check(((JArray)manifest["Games"]).Count==2,"Global export omitted an unlinked game's backups");Check(((JArray)manifest["Games"][0]["Backups"]).Count==backupService.GetBackups(game.Id).Count,"Global export lost backups");}

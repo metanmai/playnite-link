@@ -1,12 +1,12 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
-  - Version: 0.6.2
+  - Version: 0.6.3
     RequiredApiVersion: 6.18.0
     ReleaseDate: 2026-10-23
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.6.2/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.6.3/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext
     Changelog:
-      - Record and synchronize native sessions without GameActivity.
-      - Update online HLTB progress through Link browser sign-in without the HLTB add-on.
-      - Synchronize sessions when save capture fails; keep saves pending.
-      - Replace migration workflow with automatic verified backup adoption.
-      - Include privacy-filtered Ally diagnostics and validation limits.
+      - Synchronize achievement records with saves and sessions.
+      - Capture Playnite Achievements and SuccessStory caches automatically.
+      - Preserve unlocks, earliest dates and compatible partial progress across devices.
+      - View synced achievements without a source add-on on the receiving device.
+      - Keep achievement failures queued without blocking save and session sync.

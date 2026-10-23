@@ -14,7 +14,7 @@ New-Item -ItemType Directory -Path $runRoot | Out-Null
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $buildDir = Join-Path $runRoot 'build'
 & (Join-Path $repoRoot 'build.ps1') -PlaynitePath $PlaynitePath -BuildDirectory $buildDir
-$suites = @('AuditTests','CrashRecoveryTests','SaveManagerReplacementTests','Tests','VaultTests','StreamingTests','SecurityTests','ApplicationLockTests','SetupTests','ActivityTests','HltbTests','NativeHltbTests','MetadataTransferTests')
+$suites = @('AuditTests','CrashRecoveryTests','SaveManagerReplacementTests','Tests','VaultTests','StreamingTests','SecurityTests','ApplicationLockTests','SetupTests','ActivityTests','HltbTests','NativeHltbTests','AchievementTests','MetadataTransferTests')
 if ($IncludeRuntimeDownload) { $suites += 'RuntimeTests' }
 $results = @()
 foreach ($suite in $suites) {

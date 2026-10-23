@@ -344,6 +344,7 @@ namespace PlaytimeRclone
                 items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Save manager…",Action=_=>Guard(()=>ShowSaveManager(game,key))});
                 items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Quick backup",Action=_=>Guard(()=>QuickBackup(new[]{game}))});
                 items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Sessions & device sync status…",Action=_=>Guard(()=>ShowGameSyncHistory(game))});
+                items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Achievements…",Action=_=>Guard(()=>ShowAchievements(game))});
                 if(syncing==0)foreach(var backup in Backups.GetBackups(game.Id).OrderByDescending(b=>b.CreatedAt).Take(9)){var captured=backup;items.Add(new GameMenuItem{MenuSection="Playnite Link|Restore backup",Description=backup.CreatedAt.ToString("g")+" · "+backup.Description,Action=_=>QuickRestore(game,key,captured)});}}
             return items;
         }
