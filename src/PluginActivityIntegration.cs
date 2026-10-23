@@ -115,33 +115,12 @@ namespace PlaytimeRclone
             if(onboarding==null||!onboarding.OnlineHltb||!devicePreferences.SyncPlaytime||DateTime.UtcNow<hltbRetryAfter)return;
             try
             {
-                var plugin=UI(()=>PlayniteApi.Addons.Plugins.FirstOrDefault(p=>p.GetType().FullName=="HowLongToBeat.HowLongToBeat"));if(plugin==null)return;
-                var db=PluginActivityStore.Member(plugin,"PluginDatabase");var api=PluginActivityStore.Member(db,"HowLongToBeatApi");
-                if(api==null||!(bool)PluginActivityStore.Call(api,"GetIsUserLoggedIn")){activityStatus="Sign in through HowLongToBeat to upload merged progress. Cloud sessions remain synchronized.";hltbRetryAfter=DateTime.UtcNow.AddMinutes(5);return;}
-                if(hltbProgress==null)hltbProgress=new HltbProgress(Root);
-                var pending=0;
-                foreach(var map in repository.Snapshot().Mappings)
-                {
-                    if(closing||transferCancelled)return;
-                    var game=UI(()=>PlayniteApi.Database.Games.Get(new Guid(map.Key)));
-                    if(game==null||game.IsRunning||game.IsLaunching||UI(()=>activityReview.Contains(game.Id)))continue;
-                    var snapshot=repository.SnapshotGame(map.Key);var mapping=snapshot.Mappings[map.Key];
-                    if(game.Playtime!=mapping.Expected||game.Playtime!=new Ledger(snapshot.Entries).Total(mapping.Key)){pending++;continue;}
-                    var record=UI(()=>PluginActivityStore.Call(db,"Get",game.Id,true,false));
-                    var data=record==null?null:PluginActivityStore.Call(record,"GetData");
-                    var id=Convert.ToString(PluginActivityStore.Member(data,"Id"));if(String.IsNullOrWhiteSpace(id)||Convert.ToBoolean(PluginActivityStore.Member(data,"IsVndb")??false)){pending++;continue;}
-                    var submission=Convert.ToString(PluginActivityStore.Member(record,"UserGameId"));
-                    if(String.IsNullOrWhiteSpace(submission)||submission=="0")submission=Convert.ToString(PluginActivityStore.Call(api,"FindIdExisting",id));
-                    if(String.IsNullOrWhiteSpace(submission)||submission=="0"){pending++;continue;}
-                    var account=Convert.ToString(PluginActivityStore.Member(PluginActivityStore.Member(db,"PluginSettings"),"UserLogin"));
-                    await hltbProgress.Update(Identity.Hash(account+":"+id+":"+submission),game.Playtime,new OnlineProgress{Api=api,Game=game,Submission=submission,HltbId=id},DateTime.UtcNow);
-                }
-                if(activityReview.Count==0)activityStatus="GameActivity sessions and existing online HLTB progress are up to date."+(pending>0?" "+pending+" game(s) need an HLTB profile entry or playtime review.":"");
+                await SyncNativeHltb();
             }
             catch(Exception ex){hltbRetryAfter=DateTime.UtcNow.AddMinutes(2);activityStatus="HLTB progress is queued: "+ex.Message;logger.Error(ex,"Online HLTB progress deferred.");}
         }
         private ActivityBridge activityBridge;
-        private string activityStatus="Session integration detects GameActivity and HowLongToBeat automatically.";
+        private string activityStatus="Link records and synchronizes session history. Online HLTB progress uses your browser sign-in.";
         private TextBlock activityStatusText;
         private void ShowSessionHistory(Game game)
         {

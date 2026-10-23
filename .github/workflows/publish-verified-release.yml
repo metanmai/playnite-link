@@ -35,7 +35,7 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release already exists; verifying its assets before cleanup."
           else
-            gh release create "$tag" "$package" "$source" SHA256SUMS.txt --target "$GITHUB_SHA" --title "Playnite Link $version — audited save recovery and cloud sync" --notes-file release-notes.md --latest
+            gh release create "$tag" "$package" "$source" SHA256SUMS.txt --target "$GITHUB_SHA" --title "Playnite Link $version" --notes-file release-notes.md --latest
           fi
           mkdir verified
           gh release download "$tag" --dir verified --pattern "$package" --pattern "$source" --pattern SHA256SUMS.txt

@@ -1,12 +1,12 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
-  - Version: 0.6.1
+  - Version: 0.6.2
     RequiredApiVersion: 6.18.0
     ReleaseDate: 2026-10-23
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.6.1/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.6.2/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext
     Changelog:
-      - Integrate Save Manager backup core, migration, multi-source saves and named backups.
-      - Add per-game sessions and confirmed device save status.
-      - Fix receipt upload timeout in large libraries.
-      - Pass 301 regression cases and Desktop/Fullscreen host validation.
-      - Include AGPL-3.0 corresponding source and document real-game validation limits.
+      - Record and synchronize native sessions without GameActivity.
+      - Update online HLTB progress through Link browser sign-in without the HLTB add-on.
+      - Synchronize sessions when save capture fails; keep saves pending.
+      - Replace migration workflow with automatic verified backup adoption.
+      - Include privacy-filtered Ally diagnostics and validation limits.

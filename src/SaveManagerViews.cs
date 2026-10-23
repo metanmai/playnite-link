@@ -181,7 +181,7 @@ namespace PlaytimeRclone
         {RestoreArchiveCore(game,key,path,true);}
         private void RestoreArchiveCore(Game game,string key,string path,bool includeExcluded)
         {
-            if(MigrationBlocksSync)throw new IOException("Finish migration and restart Playnite before restoring with Link.");
+            if(MigrationBlocksSync)throw new IOException("Existing backups are prepared automatically. Restart Playnite to release the loaded Save Manager extension before restoring with Link.");
             var plan=Plan(game,key);
             if(includeExcluded){var all=JsonSafety.Deserialize<SaveLink>(JsonConvert.SerializeObject(Link(key)));all.RestoreExclusions=new List<string>();plan=new SavePlan(all,game.InstallDirectory,blobs,Path.Combine(Root,"save-transactions",key+".json"));}
             var data=SaveArchive.Read(path,plan,blobs);var local=plan.Capture();

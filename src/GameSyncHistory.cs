@@ -85,7 +85,7 @@ namespace PlaytimeRclone
                 var receipt=new GameSyncReceipt{Device=state.Device,Game=pair.Value.Key,CheckedUtc=DateTimeOffset.UtcNow.ToString("O"),Sessions=GameSyncReceipt.SessionDigest(state.Entries,pair.Value.Key),State="pending",Revision=link.Save.Revision,Content=link.Save.Content};
                 if(UI(()=>GameBusy(game.Id))||state.Active.ContainsKey(pair.Key))receipt.State="playing";
                 else if(!link.HasSaves||!devicePreferences.SyncSaves)receipt.State="disabled";
-                else if(devicePreferences.SyncPlaytime&&GameSyncReceipt.SessionDigest(sentSessions,pair.Value.Key)==receipt.Sessions&&heads.Count==1&&heads[0].Hash()==link.Save.Revision&&Revision.ContentHashOf(Plan(game,pair.Value.Key).Capture())==link.Save.Content){receipt.State="confirmed";receipt.Content=heads[0].ContentHash();}
+                else if(!unavailableSaveGames.Contains(pair.Value.Key)&&devicePreferences.SyncPlaytime&&GameSyncReceipt.SessionDigest(sentSessions,pair.Value.Key)==receipt.Sessions&&heads.Count==1&&heads[0].Hash()==link.Save.Revision&&Revision.ContentHashOf(Plan(game,pair.Value.Key).Capture())==link.Save.Content){receipt.State="confirmed";receipt.Content=heads[0].ContentHash();}
                 receipts.Publish(receipt);pending.Add(receipt);
             }
             var transport=new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/receipts/objects",cancelled:()=>closing||TransferStopped);

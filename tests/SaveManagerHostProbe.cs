@@ -89,8 +89,24 @@ public sealed class HostProbe:GenericPlugin
         await (Task)Call("SaveOperation",game,new Action(()=>Call("ImportSaveBackup",game,key,legacyZip)));Check(backupService.GetBackups(game.Id).Count==before,"Repeated ZIP import duplicated a backup");
         var moved=Path.Combine(root,"CustomBackups");await (Task)Call("SaveOperation",game,new Action(()=>Call("RelocateBackupDirectory",config.ConfigId,moved)));subject.PersonalVault.State.Links[key].BackupRoot=moved;subject.PersonalVault.Save();Check(backupService.GetBackups(game.Id).All(b=>File.Exists(backupService.GetFullBackupPath(b.BackupFilePath))),"Relocated backup paths invalid");Check(Directory.GetFiles(Path.Combine(moved,config.ConfigId.ToString()),"*.zip").Length==3,"Custom backup root lost files");
         var unlinked=Guid.NewGuid();backupService.GetOrCreateGameConfig(unlinked,"Unlinked backup fixture");backupService.ImportBackup(unlinked,"Unlinked backup fixture",backupService.GetFullBackupPath(backup.BackupFilePath));
+        Check(!PlayniteApi.Addons.Plugins.Any(p=>p.GetType().FullName=="HowLongToBeat.HowLongToBeat"||p.Id==new Guid("afbb1a0d-04a1-4d0c-9afa-c6e42ca855b4")),"Independent-session fixture unexpectedly has optional add-ons");
+        subject.OnGameStarted(Event<OnGameStartedEventArgs>(game));
+        ((HashSet<string>)Field("live")).Clear();
+        var stopped=Event<OnGameStoppedEventArgs>(game);typeof(OnGameStoppedEventArgs).GetField("<ElapsedSeconds>k__BackingField",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(stopped,5UL);
+        game.Playtime+=5;PlayniteApi.Database.Games.Update(game);subject.OnGameStopped(stopped);
+        Check(!repo.Snapshot().Active.ContainsKey(game.Id.ToString()),"Durable session was lost when volatile tracking was absent");
+        var recorded=repo.Snapshot().Entries.Last(e=>e.Kind=="session"&&e.Game==key);Check(recorded.Seconds==5,"Native session duration changed");
+        using(var held=new FileStream(Path.Combine(first,"progress.sav"),FileMode.Open,FileAccess.ReadWrite,FileShare.None))
+        {
+            await subject.SyncPersonalAsync(true,null);
+            Check(game.Playtime==new Ledger(repo.Snapshot().Entries).Total(key),"Locked save blocked native playtime projection");
+            var remote=Path.Combine(root,"Cloud","personal","playnite-link-v1","ledger","objects");
+            Check(Directory.GetFiles(remote,"*.json").Any(path=>File.ReadAllText(path).Contains(recorded.Id)),"Locked save blocked session upload");
+        }
+        await Until(()=>!subject.IsSyncRunning);
+        await Open("ShowSaveBackups",new object[0],()=>{Check(!Elements<TextBlock>(window).Any(t=>t.Text.Contains("migration")||t.Text.Contains("retire")),"Migration workflow is still exposed");});
         var bundle=Path.Combine(root,"all-backups.zip");Call("ExportSaveBundle",bundle);Check(File.Exists(bundle),"Global export missing");
-        using(var file=File.OpenRead(bundle))using(var zip=new System.IO.Compression.ZipArchive(file,System.IO.Compression.ZipArchiveMode.Read)){var manifest=SaveMigrationFiles.BundleManifest(zip);Check(((JArray)manifest["Games"]).Count==2,"Global export omitted an unlinked game's backups");Check(((JArray)manifest["Games"][0]["Backups"]).Count==3,"Global export lost backups");}
+        using(var file=File.OpenRead(bundle))using(var zip=new System.IO.Compression.ZipArchive(file,System.IO.Compression.ZipArchiveMode.Read)){var manifest=SaveMigrationFiles.BundleManifest(zip);Check(((JArray)manifest["Games"]).Count==2,"Global export omitted an unlinked game's backups");Check(((JArray)manifest["Games"][0]["Backups"]).Count==backupService.GetBackups(game.Id).Count,"Global export lost backups");}
         Call("ExportSaveBundle",bundle);Check(File.Exists(bundle+".bak"),"Export overwrite did not preserve the prior bundle");
         await Open("ShowBundleImport",new object[]{bundle},()=>{Check(Elements<Button>(window).Count(b=>Convert.ToString(b.Content)=="Review and import…")==2,"Bundle import omitted a configuration");Check(Elements<TextBlock>(window).Any(t=>t.Text=="Unlinked backup fixture"),"Unlinked backup import unavailable");});
         File.WriteAllText(Path.Combine(first,"config.ini"),"force restore fixture");await (Task)Call("SaveOperation",game,new Action(()=>Call("RestoreArchiveIncludingExcluded",game,key,backupService.GetFullBackupPath(backup.BackupFilePath))));Check(File.ReadAllText(Path.Combine(first,"config.ini"))=="local graphics","Restore including exclusions did not restore settings");Check(subject.PersonalVault.State.Links[key].RestoreExclusions.Count==1,"One-time force restore changed exclusion preferences");Check(subject.GetGameMenuItems(new GetGameMenuItemsArgs{Games=new List<Game>{game}}).Any(i=>i.MenuSection=="Playnite Link|Restore backup"),"Recent backup shortcuts missing");

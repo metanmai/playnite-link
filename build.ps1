@@ -52,6 +52,9 @@ Write-Output "Built extension and tests in $buildDir"
 
 
 Copy-Item (Join-Path $projectRoot "src/SetupApply.ps1") $buildDir -Force
+Copy-Item (Join-Path $projectRoot "src/Collect-LinkDiagnostics.ps1") $buildDir -Force
+& $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/NativeHltbTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/NativeHltbTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Native HLTB test compilation failed' }
 & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/SetupTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/SetupTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Setup sync test compilation failed' }
 & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/ActivityTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/ActivityTests.cs')

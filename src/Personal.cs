@@ -168,6 +168,7 @@ namespace PlaytimeRclone
                 } } catch(Exception ex) { logger.Warn("Could not inspect an optional history cache: "+ex.GetType().Name); }
             }
         }
+        private readonly HashSet<string> unavailableSaveGames=new HashSet<string>();
         private void CaptureLocalChanges(List<SyncGame> games)
         {
             foreach(var item in games)
@@ -175,12 +176,15 @@ namespace PlaytimeRclone
                 if(UI(()=>GameBusy(item.Game.Id)))continue;
                 SaveLink link;if(!vault.State.Links.TryGetValue(item.Key,out link))continue;
                 if(devicePreferences.SyncPreferences)RecordLocal(item.Key,"preferences",item.Preferences,link.Preferences);
-                if(devicePreferences.SyncSaves&&link.HasSaves){var plan=Plan(item.Game,item.Key);var full=plan.Capture(true);var captured=plan.Filter(full);Revision previous;var all=vault.Read(vault.Objects);var known=link.Save.Revision!=null&&all.TryGetValue(link.Save.Revision,out previous);previous=known?all[link.Save.Revision]:null;if(previous!=null&&plan.NeedsSourceReview(previous.Data,captured))continue;var publication=previous==null?full:plan.ForPublication(full,previous.Data);if(!UI(()=>GameBusy(item.Game.Id)))RecordLocal(item.Key,"save",captured,link.Save,publication);}
+                try{if(devicePreferences.SyncSaves&&link.HasSaves){var plan=Plan(item.Game,item.Key);var full=plan.Capture(true);var captured=plan.Filter(full);Revision previous;var all=vault.Read(vault.Objects);var known=link.Save.Revision!=null&&all.TryGetValue(link.Save.Revision,out previous);previous=known?all[link.Save.Revision]:null;if(previous!=null&&plan.NeedsSourceReview(previous.Data,captured))continue;var publication=previous==null?full:plan.ForPublication(full,previous.Data);if(!UI(()=>GameBusy(item.Game.Id)))RecordLocal(item.Key,"save",captured,link.Save,publication);}}
+                catch(OperationCanceledException){throw;}
+                catch(Exception ex){unavailableSaveGames.Add(item.Key);logger.Warn(ex,"Save capture deferred; session history will still synchronize.");}
             }
         }
         public System.Threading.Tasks.Task<bool> SyncPersonalAsync(bool interactive,Game launching,bool metadataOnly=false)
         {
-            if(MigrationBlocksSync)throw new InvalidOperationException("Finish Save Manager migration and restart Playnite before syncing with Link. This prevents two save tools from managing the same game.");
+            if(preparingExistingBackups)return System.Threading.Tasks.Task.FromResult(false);
+            if(MigrationBlocksSync)throw new InvalidOperationException("Existing backups are being prepared automatically. Restart Playnite after preparation finishes so Link can take over from the loaded Save Manager extension.");
             if(vaultSwitchPending)throw new InvalidOperationException("Restart Playnite to finish switching vaults before syncing.");
             if(interactive)UI(()=>ResumeTransfers());
             else if(IsSyncPaused)return System.Threading.Tasks.Task.FromResult(false);
@@ -195,6 +199,7 @@ namespace PlaytimeRclone
                 try
                 {
                     CheckTransfer();
+                    unavailableSaveGames.Clear();
                     ReportStatus("Reading local changes before checking the cloud.",SyncDisplayState.Working,"Preparing sync");
                     if(repository==null)throw new InvalidOperationException(status);
                     UI(()=>EnsureAutomaticLinks());
@@ -242,6 +247,10 @@ namespace PlaytimeRclone
                     var sentSessions=repository.Snapshot().Entries;
                     if(devicePreferences.SyncPlaytime)new SyncEngine().Run(repository,new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,cancelled:()=>closing||TransferStopped),Path.Combine(Root,"scratch"),Path.Combine(metadataCache,"ledger","objects"),false,false);
                     if(devicePreferences.SyncPlaytime)new SyncEngine().Run(repository,new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/activity/objects",cancelled:()=>closing||TransferStopped),Path.Combine(Root,"scratch"),Path.Combine(metadataCache,"activity","objects"),true,false);
+                    // Sessions and their displayed totals must not wait for a save
+                    // archive upload, missing directory or optional add-on adapter.
+                    await ProjectAsync();
+                    if(launching==null)await SyncOnlineHltb();
                     vault.Import(incoming);var review=ReadSaveConflicts();UI(()=>savedConflicts=review);
                     if(metadataOnly)
                     {
@@ -256,7 +265,7 @@ namespace PlaytimeRclone
                         });
                         if(!pendingLocal&&!preferencesChanged&&!unappliedRemote)
                         {
-                            await ProjectAsync();ReportStatus("",SyncDisplayState.Working,"Finishing sync");await SyncOnlineHltb();TrySyncSetup();var reviewNeeded=projectionFailures>0||UI(()=>activityReview.Count>0)||review.Count>0;ReportStatus(reviewNeeded?"Choose a version to continue.":"Local save files are checked by a full sync before launch or when you choose Sync now.",reviewNeeded?SyncDisplayState.Review:SyncDisplayState.Completed,reviewNeeded?"Review needed":"Cloud checked");idleUnchanged=true;completed=true;return true;
+                            await ProjectAsync();ReportStatus("",SyncDisplayState.Working,"Finishing sync");TrySyncSetup();var reviewNeeded=projectionFailures>0||UI(()=>activityReview.Count>0)||review.Count>0;ReportStatus(reviewNeeded?"Choose a version to continue.":"Local save files are checked by a full sync before launch or when you choose Sync now.",reviewNeeded?SyncDisplayState.Review:SyncDisplayState.Completed,reviewNeeded?"Review needed":"Cloud checked");idleUnchanged=true;completed=true;return true;
                         }
                         CaptureLocalChanges(games);
                     }
@@ -266,6 +275,7 @@ namespace PlaytimeRclone
                     var checkedGames=0;
                     foreach(var item in games)
                     {
+                        if(unavailableSaveGames.Contains(item.Key)){cancelled=true;continue;}
                         CheckTransfer();ReportStatus("Checking "+item.Game.Name+" for save and library changes.",SyncDisplayState.Working,"Checking selected games",++checkedGames,games.Count);
                         if(UI(()=>GameBusy(item.Game.Id)))continue;
                         var game=item.Game;var link=Link(item.Key);
@@ -311,9 +321,9 @@ namespace PlaytimeRclone
                         if(cancelled)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Conflict","Save versions need your review. Your local progress is kept.",NotificationType.Error));
                         else {PlayniteApi.Notifications.Remove("PlayniteLink.Conflict");if(activityReview.Count==0)PlayniteApi.Notifications.Remove("PlaytimeRclone.Error");}
                     });
-                    if(launching==null){ReportStatus("",SyncDisplayState.Working,"Finishing sync");if(!cancelled)await SyncOnlineHltb();TrySyncSetup();}
+                    if(launching==null){ReportStatus("",SyncDisplayState.Working,"Finishing sync");TrySyncSetup();}
                     var needsReview=cancelled||projectionFailures>0||UI(()=>activityReview.Count>0||savedConflicts.Count>0);
-                    ReportStatus(needsReview?"Choose a version to continue.":"",needsReview?SyncDisplayState.Review:SyncDisplayState.Completed,needsReview?"Review needed":"Up to date");completed=true;return true;
+                    ReportStatus(unavailableSaveGames.Count>0?"Sessions synchronized; "+unavailableSaveGames.Count+" save location(s) could not be read. Check save paths.":needsReview?"Choose a version to continue.":"",needsReview?SyncDisplayState.Review:SyncDisplayState.Completed,needsReview?"Review needed":"Up to date");completed=true;return true;
                 }
                 catch(OperationCanceledException){ReportStatus("Sync paused. Local changes are safe. Choose Resume sync to retry.",SyncDisplayState.Paused,"Paused");throw;}
                 catch(Exception ex){ReportStatus(ex.Message,ex is CloudTransferException?SyncDisplayState.Waiting:SyncDisplayState.Failed,ex is CloudTransferException?"Waiting for cloud":"Could not sync");throw;}
@@ -409,6 +419,7 @@ namespace PlaytimeRclone
             var online=Toggle(games,"Update my online HowLongToBeat progress",onboarding.OnlineHltb);
             online.Click+=(_,e)=>{onboarding.OnlineHltb=online.IsChecked==true;SaveOnboarding();if(onboarding.OnlineHltb)QueueSync();};
             Label(games,"Requires HowLongToBeat sign-in.",13,true);
+            Button(games,"Sign in to HowLongToBeat…",ShowHltbSignIn);
             activityStatusText=Label(games,activityStatus,13,true);
             
             if(connected)

@@ -1,24 +1,11 @@
-## Save Manager replacement and sync fix
+# 0.6.2: independent sessions and HLTB progress
 
-- Reuses Jurangren's Save Manager 2.0.3 ZIP/CRC backup core, with multi-folder/file saves, portable paths, exclusions, named backups, notes, retention, import/export, migration and verified retirement.
-- Adds per-game device/session history and confirmed save-revision receipts. Offline, stale, pending and unknown devices are distinguished from an up-to-date confirmation.
-- Fixes large-library receipt uploads: send only current required receipts and confirm only successfully uploaded records. Unconfigured games and accumulated historical outbox files no longer cause the observed receipt-upload timeout.
-- Includes corresponding source under AGPL-3.0; original MIT notices are retained. This combined build changes the distribution license from earlier MIT-only releases.
+Link records dated sessions and displays device history without GameActivity. Optional display failures no longer veto native playtime projection. Stop callbacks use the durable active-session journal rather than requiring a volatile tracking entry. Unreadable save locations remain pending while session metadata uploads and totals project independently.
 
-## Validation
+HLTB progress now uses Link's own browser sign-in and HTTP client, without loading the HLTB add-on. It matches unique exact titles in the signed-in user's existing profile, validates account/game/submission identity on each fresh edit, changes only progress, preserves greater totals and verifies writes before saving upload receipts. Missing or ambiguous profile entries remain pending. This release does not reproduce the HLTB add-on's theme controls or public time-to-beat search UI.
 
-301 regression cases passed, including 44 replacement cases, actual process-kill recovery and retirement safeguards. Actual Playnite Desktop and Fullscreen replacement tests each passed 47 assertions; normal launch/conflict/runtime tests also passed in both modes.
+The migration page and manual review/import/retire workflow are removed. Available existing backups with an unambiguous local game ID are copied and verified in the background. Originals remain preserved. A loaded Save Manager assembly requires one normal Playnite restart before Link can safely take over. Ambiguous configurations fail safely and retain originals. Normal backup import/export remains available.
 
-Real Bloodborne save bytes passed native ZIP/CRC validation, byte-exact local restore, stale-file removal, concurrent-edit rejection, isolated offline conflict/cancel/resolution tests, fresh Google Drive hashing and an initially uncached separate-client cloud restore. This is file/transfer validation, not certification of in-game character loading.
+Validation: all regression suites passed, including process-kill recovery and retirement safeguards. The native HLTB protocol fixture passed 27 checks; no live authenticated HLTB update is claimed for this new client. The diagnostic collector passed credential-canary exclusion, session visibility, disabled-sync reporting, event classification and file-allowlist checks. Actual Playnite host validation exercises native sessions with neither optional add-on installed, loss of volatile tracking, and session upload/display while a save file is exclusively locked. Synthetic host tests are not physical Ally certification.
 
-## Known limits
-
-The PC Bloodborne runtime encountered a null-write fault during the game test. Character loading and the physical ROG Ally transfer are not certified. The in-process diagnostic also encountered a locked runtime log; neither failure is counted as a successful clean game exit. Unrelated outside playtime edits remain reviewable rather than overwritten.
-
-Live provider acceptance covers Google Drive. Other provider protocols have configuration/regression coverage, but their real accounts, Windows 10 and physical handheld controls remain unverified. The UI is English; backup deletion is individual. Deleted backup library entries retain immutable cloud history.
-
-## Install on PC and Ally
-
-Install the .pext below and restart Playnite. Use 0.6.1 on both devices, including when an older private handoff bundle contains 0.6.0. Keep each device's own cloud authorization and select the existing cloud game identity rather than creating a duplicate. Back up destination saves before any authoritative handoff restore. A private handoff ZIP and its SHA-256 are unchanged by this release.
-
-No user saves, provider credentials, private handoff bundles or private runtime logs are included in this GitHub release. See docs/ACCEPTANCE-0.6.1.md and docs/ACCEPTANCE-0.6.0.md in the source archive for the case matrix and limitations.
+The actual Ally failure still requires its diagnostic report. Previous Bloodborne file/transfer validation remains valid; previous in-game crash/character-load limits are not reclassified as successful tests.

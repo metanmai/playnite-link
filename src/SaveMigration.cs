@@ -101,80 +101,15 @@ namespace PlaytimeRclone
         }
         private IEnumerable<JProperty> LegacyConfigs(JObject data)
         {var configs=data["GameConfigs"] as JObject;if(configs==null)throw new IOException("Unsupported legacy configuration layout. Export each game configuration from Save Manager, then import it in Link.");return configs.Properties();}
-        private void ShowSaveMigration()
+        private void ShowSaveBackups()
         {
-            var window=Window("Save Manager migration & portability",900,780);var panel=Page(window,"Save Manager migration & portability","Import existing paths and backups, then retire the separate extension.");
-            Label(panel,"Migration copies and verifies backups. It does not replace any live game saves. Your original Save Manager data and provider authorization remain available for recovery.",13,true);
+            var window=Window("Save backups",900,680);var panel=Page(window,"Save backups","Backups run automatically after playing. Restore or export a copy whenever you need it.");
             var global=Card(panel,"Portable backup packages");
             Button(global,"Backup settings…",ShowBackupSettings);
             Button(global,"Open local backup data",()=>Process.Start(Path.Combine(Root,"save-manager")));
             var maintenance=new StackPanel();Button(maintenance,"Reset local save manager…",ResetLocalSaveManager);Button(maintenance,"Erase all cloud vault data…",EraseCloudVault);Details(panel,"Data maintenance",maintenance);
             Button(global,"Export all configurations & backups…",()=>{if(syncing!=0)throw new IOException("Wait for sync first.");var picker=new Microsoft.Win32.SaveFileDialog{Filter="Link backup package|*.zip",FileName="PlayniteLink-save-backups.zip"};if(picker.ShowDialog(window)==true)ExportSaveBundle(picker.FileName);});
             Button(global,"Import backup package…",()=>{var picker=new Microsoft.Win32.OpenFileDialog{Filter="Link / Save Manager package|*.zip",CheckFileExists=true};if(picker.ShowDialog(window)==true){window.Close();ShowBundleImport(picker.FileName);}});
-            var recovery=Card(panel,"Recover backups from Save Manager's cloud","Download a recovery copy of the old vault before migrating. This only reads the old cloud; it does not sync or overwrite live saves.");
-            var legacyRemote=EntryField(recovery,"Old Save Manager remote and folder",LegacyRemote());
-            var recoveryFeedback=Label(recovery,"",13);var recover=Button(recovery,"Download legacy cloud backups",()=>{});
-            recover.Click+=async(_,e)=>{
-                if(syncing!=0){recoveryFeedback.Text="Wait for sync to finish first.";return;}
-                recover.IsEnabled=false;
-                try
-                {
-                    var remote=legacyRemote.Text.Trim();if(!remote.Contains(":"))throw new IOException("Enter a configured Rclone remote and folder.");
-                    recoveryFeedback.Text="Downloading old configuration and ZIP backups…";
-                    await System.Threading.Tasks.Task.Run(()=>{
-                        var tools=Path.Combine(LegacySaveData,"Tools");var destination=Path.Combine(MigrationDirectory,"legacy-cloud");
-                        new RcloneTransport(Path.Combine(tools,"rclone.exe"),Path.Combine(tools,"rclone.conf"),remote,"",pattern:"config.json",limitSeconds:300).Pull(destination);
-                        new RcloneTransport(Path.Combine(tools,"rclone.exe"),Path.Combine(tools,"rclone.conf"),remote,"",pattern:"*.zip",limitSeconds:900).Pull(destination);
-                    });
-                    recoveryFeedback.Text="Recovery copy downloaded. Reopen this window to include any cloud-only game configurations, then migrate each game.";
-                }catch(Exception ex){recoveryFeedback.Text="Recovery incomplete: "+ex.Message;}finally{recover.IsEnabled=true;}
-            };
-            JObject data;
-            try{data=LegacyConfiguration();}catch(Exception ex){Label(panel,ex.Message);Button(Footer(window),"Close",()=>window.Close());window.ShowDialog();return;}
-            var knownConfigIds=new HashSet<string>(LegacyConfigs(data).Select(p=>p.Name));
-            var orphanGroups=(data["GameBackups"] as JObject??new JObject()).Properties().Where(p=>!knownConfigIds.Contains(p.Name)&&p.Value is JArray&&((JArray)p.Value).Count>0).ToList();
-            if(orphanGroups.Count>0)Label(panel,orphanGroups.Sum(p=>((JArray)p.Value).Count)+" unmatched historical backup records are preserved in the original configuration archive. They need a game/path mapping before they can be restored.",13,true);
-            foreach(var property in LegacyConfigs(data).ToList())
-            {
-                var id=property.Name;var config=(JObject)property.Value;var name=(string)config["GameName"]??"Unknown game";
-                var backups=(data["GameBackups"]==null?null:data["GameBackups"][id]) as JArray;
-                var card=Card(panel,name,(config["SavePaths"] as JArray??new JArray()).Count+" save paths · "+(backups==null?0:backups.Count)+" backups");
-                var allGames=PlayniteApi.Database.Games.OrderBy(g=>g.Name).ToList();var selector=new ComboBox{ItemsSource=allGames,DisplayMemberPath="Name",MinHeight=36};StyleInput(selector);card.Children.Add(selector);
-                var gameIds=(config["GameIds"] as JArray??new JArray()).Select(t=>(string)t).ToList();if(config["GameId"]!=null)gameIds.Add((string)config["GameId"]);
-                selector.SelectedItem=allGames.FirstOrDefault(g=>gameIds.Contains(g.Id.ToString(),StringComparer.OrdinalIgnoreCase));
-                var feedback=Label(card,"Choose the matching local game, then review its save destinations.",13,true);
-                Button(card,"Link selected game…",()=>{var game=selector.SelectedItem as Game;if(game==null)throw new IOException("Choose a local game.");if(!repository.Snapshot().Mappings.ContainsKey(game.Id.ToString()))Enroll(game);});
-                var migrate=Button(card,"Review and migrate…",()=>{});
-                migrate.Click+=async(_,e)=>{
-                    var game=selector.SelectedItem as Game;if(game==null){feedback.Text="Choose the matching local game.";return;}
-                    Mapping map;if(!repository.Snapshot().Mappings.TryGetValue(game.Id.ToString(),out map)){feedback.Text="Link the selected game first.";return;}
-                    if(syncing!=0||GameBusy(game.Id)){feedback.Text="Stop the game and wait for sync first.";return;}
-                    try
-                    {
-                        var incoming=ParseSaveConfiguration(config.ToString());
-                        var legacySettings=Path.Combine(LegacySaveData,"settings.json");if(File.Exists(legacySettings))SaveManagerOptions.ApplyLegacy(incoming,JsonSafety.Object(File.ReadAllText(legacySettings)),id);
-                        if(incoming.Sources.Any(s=>s.Path.Contains("{EmulatorDir}")))incoming.EmulatorDirectory=Backups.GetEmulatorDirectory(game.Id);
-                        ValidatePlan(game,incoming);var destinations=incoming.HasSaves?String.Join("\n",new SavePlan(incoming,game.InstallDirectory,blobs,Path.Combine(Root,"validation.json")).Sources.Select(s=>s.Path)):"No live save paths; import backups only.";
-                        if(PlayniteApi.Dialogs.ShowMessage("Migrate "+name+" into "+game.Name+"?\n\n"+destinations+"\n\nAll available backups will be copied and verified. Live saves will not be restored.","Save Manager migration",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
-                        migrate.IsEnabled=false;feedback.Text="Copying and verifying backups…";
-                        await SaveOperation(game,()=>MigrateLegacyGame(id,config,backups??new JArray(),game,map.Key,incoming));
-                        var receipt=JsonSafety.Deserialize<SaveMigrationReceipt>(File.ReadAllText(Path.Combine(MigrationDirectory,id+".json")));
-                        feedback.Text="Available backups migrated and verified. "+receipt.Unavailable.Count+" historical records have no available ZIP.";
-                        QueueSync();
-                    }
-                    catch(Exception ex){feedback.Text="Migration incomplete: "+ex.Message;}
-                    finally{migrate.IsEnabled=true;}
-                };
-            }
-            var retire=Card(panel,"Retire the separate Save Manager extension","Available after every configured game and backup has a verified migration receipt. Close Playnite after scheduling removal; the extension is archived outside its Extensions folder.");
-            var acknowledge=Toggle(retire,"Keep records for unavailable old ZIPs and allow retirement",false);
-            Label(retire,"Use this only after recovering the old cloud. A missing ZIP cannot be recreated from its filename or checksum. Available archives and the old configuration remain preserved.",13,true);
-            Button(retire,"Verify migration and remove Save Manager on exit",()=>{
-                if(syncing!=0)throw new IOException("Wait for sync first.");
-                if(acknowledge.IsChecked==true)foreach(var property in LegacyConfigs(data)){var path=Path.Combine(MigrationDirectory,property.Name+".json");if(File.Exists(path)){var receipt=JsonSafety.Deserialize<SaveMigrationReceipt>(File.ReadAllText(path));receipt.UnavailableAcknowledged=true;Atomic.Write(path,JsonConvert.SerializeObject(receipt,Formatting.Indented));}}
-                VerifyLegacyMigration(data);ScheduleSaveManagerRetirement();
-                Label(retire,"Removal is scheduled. Close Playnite normally, then reopen it. Recovery copies and the old ExtensionsData folder are retained.");
-            });
             Button(Footer(window),"Close",()=>window.Close());window.ShowDialog();
         }
         private void MigrateLegacyGame(string id,JObject config,JArray backups,Game game,string key,SaveLink incoming)

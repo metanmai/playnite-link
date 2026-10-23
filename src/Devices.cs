@@ -47,7 +47,7 @@ namespace PlaytimeRclone
         public List<string> Parents=new List<string>();
         public DevicePreferences Settings;
         public string State;
-        public string AppVersion="0.6.1";
+        public string AppVersion="0.6.2";
         public List<DeviceGame> Games;
         public string Canonical(){return JsonConvert.SerializeObject(this,Formatting.None);}
         public string Hash(){return Identity.Hash(Canonical());}

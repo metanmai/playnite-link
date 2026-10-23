@@ -8,6 +8,8 @@ $releasePath = if($ReleaseDirectory){[IO.Path]::GetFullPath($ReleaseDirectory)}e
 New-Item -ItemType Directory -Force $stagePath,$releasePath | Out-Null
 Copy-Item (Join-Path $projectRoot 'src/SetupApply.ps1'),(Join-Path $buildDir 'PlayniteLink.dll'),(Join-Path $projectRoot 'extension.yaml'),(Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'LICENSE'),(Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') $stagePath -Force
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll'),(Join-Path $projectRoot 'src/RetireSaveManager.ps1') $stagePath -Force
+Copy-Item (Join-Path $projectRoot 'src/Collect-LinkDiagnostics.ps1') $stagePath -Force
+Copy-Item (Join-Path $projectRoot 'docs/ALLY-DIAGNOSTICS-PROMPT.txt') $stagePath -Force
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $stagePath -Force
 Copy-Item (Join-Path $projectRoot 'vendor/Notifications/LICENSE.md') (Join-Path $stagePath 'Notifications-LICENSE.md')
 $sourceStage=Join-Path $buildDir ('source-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
@@ -18,6 +20,7 @@ $sourceDocs=Join-Path $sourceStage 'docs'
 $sourceEvidence=Join-Path $sourceDocs 'evidence'
 New-Item -ItemType Directory -Force $sourceDocs,$sourceEvidence | Out-Null
 Get-ChildItem (Join-Path $projectRoot 'docs') -Filter '*.md' | Copy-Item -Destination $sourceDocs
+Copy-Item (Join-Path $projectRoot 'docs/ALLY-DIAGNOSTICS-PROMPT.txt') $sourceDocs
 foreach($name in @('acceptance-tally.json','saves-0511-local-tally.json','saves-0511-local-extra-tally.json','saves-0511-local-transfer-tally.json','saves-0511-cloud-tally.json','saves-0511-cloud-transfer-tally.json')){Copy-Item (Join-Path $projectRoot ('docs/evidence/'+$name)) $sourceEvidence}
 Copy-Item (Join-Path $projectRoot 'docs/evidence/save-manager-060') $sourceEvidence -Recurse
 if(Test-Path (Join-Path $projectRoot 'docs/evidence/save-manager-061')){Copy-Item (Join-Path $projectRoot 'docs/evidence/save-manager-061') $sourceEvidence -Recurse}

@@ -204,7 +204,8 @@ namespace PlaytimeRclone
                     CheckIdentity(game, pair.Value);
                     repository.EnsureBaselineCount(pair.Key,game.PlayCount);
                     if(game.Playtime!=pair.Value.Expected&&game.Playtime!=pair.Value.Intended)throw new InvalidOperationException("Playtime changed outside Playnite Link. Review the edit before activity history is updated.");
-                    if(!ProjectActivity(game))continue;
+                    // Optional displays cannot veto Link's native ledger projection.
+                    try{ProjectActivity(game);}catch(Exception ex){logger.Warn(ex,"Optional session display deferred; native history is retained.");}
                     var oldTime=game.Playtime;var oldCount=game.PlayCount;var oldDate=game.LastActivity;
                     repository.AcceptProjection(pair.Key, game.Playtime, value => {game.Playtime = value;});
                     SetActivityCounters(game);
@@ -226,9 +227,10 @@ namespace PlaytimeRclone
             if (repository == null) return;
             CheckInstalledSaves();
             CompleteMigrationRestart();
+            AdoptExistingSaveBackups();
             if(File.Exists(Path.Combine(MigrationDirectory,"retirement-result.json"))&&(bool?)JsonSafety.Object(File.ReadAllText(Path.Combine(MigrationDirectory,"retirement-result.json")))["Removed"]==true)ProtectRetiredSaveManager();
             var retirement=Path.Combine(MigrationDirectory,"retirement-result.json");
-            if(File.Exists(retirement)){var outcome=JsonSafety.Object(File.ReadAllText(retirement));if((bool?)outcome["Removed"]==false)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Retirement","Save Manager removal did not finish: "+(string)outcome["Error"],NotificationType.Error,()=>Guard(ShowSaveMigration)));}
+            if(File.Exists(retirement)){var outcome=JsonSafety.Object(File.ReadAllText(retirement));if((bool?)outcome["Removed"]==false)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Retirement","Save Manager removal did not finish: "+(string)outcome["Error"],NotificationType.Error,()=>Guard(ShowSaveBackups)));}
             if(setup!=null&&setup.RecoveryRequired)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.SetupRecovery","An interrupted add-on installation needs recovery. Open Playnite Link → Add-ons → Recover interrupted installation and restart.",NotificationType.Error));
             if (repository.Snapshot().Active.Count > 0)
                 PlayniteApi.Notifications.Add(new NotificationMessage("PlaytimeRclone.Pending", "Unfinished playtime sessions need review. Use the game's Playnite Link recovery menu.", NotificationType.Error));
@@ -244,9 +246,9 @@ namespace PlaytimeRclone
             {
                 if (repository == null) return;
                 var snapshot = repository.Snapshot(); Mapping map;
-                if (!snapshot.Mappings.TryGetValue(args.Game.Id.ToString(), out map)) return;
+                if (!snapshot.Mappings.TryGetValue(args.Game.Id.ToString(), out map)){logger.Info("Playnite Link session not tracked: game is not linked on this device.");return;}
                 CheckIdentity(args.Game, map);
-                if (repository.Start(args.Game.Id.ToString(), args.Game.Playtime)) live.Add(args.Game.Id.ToString());
+                if (repository.Start(args.Game.Id.ToString(), args.Game.Playtime)){live.Add(args.Game.Id.ToString());logger.Info("Playnite Link session started; cloud game key: "+map.Key);}
                 QueueSync();
             }
             catch (Exception ex) { NotifyError(ex); }
@@ -273,11 +275,14 @@ namespace PlaytimeRclone
         }
         public override void OnGameStopped(OnGameStoppedEventArgs args)
         {
+            if(!PlayniteApi.MainView.UIDispatcher.CheckAccess()){UI(()=>OnGameStopped(args));return;}
             UI(()=>launchReservations.Remove(args.Game.Id));
             try
             {
                 if (repository == null) return;
-                if (!live.Contains(args.Game.Id.ToString())) return;
+                // The durable session is authoritative, including after a callback
+                // ordering change. A volatile in-memory set must not discard it.
+                if (!repository.Snapshot().Active.ContainsKey(args.Game.Id.ToString())) return;
                 if (repository.Stop(args.Game.Id.ToString(), args.ElapsedSeconds))
                 {
                     live.Remove(args.Game.Id.ToString());
@@ -321,7 +326,8 @@ namespace PlaytimeRclone
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Sync personal vault now", Action = _ => Guard(() => RequestSync(true)) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Add-ons", Action = _ => Guard(ManageSetup) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Connected devices", Action = _ => Guard(ManageDevices) },
-                new MainMenuItem { MenuSection = "@Playnite Link", Description = "Save Manager migration & portability", Action = _ => Guard(ShowSaveMigration) },
+                new MainMenuItem { MenuSection = "@Playnite Link", Description = "Save backups", Action = _ => Guard(ShowSaveBackups) },
+                new MainMenuItem { MenuSection = "@Playnite Link", Description = "Export sync diagnostics", Action = _ => Guard(ExportSyncDiagnostics) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Passcode", Action = _ => Guard(ManageSecurity) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Lock Playnite now", Action = _ => {if(security!=null&&!security.Enabled)ManageSecurity();else LockApplication();} },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Show sync status", Action = _ => PlayniteApi.Dialogs.ShowMessage(status, "Playnite Link") }

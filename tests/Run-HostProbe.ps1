@@ -62,7 +62,7 @@ if($LockProbe){
  $protection.Configure('isolated-test-passcode',1)
  $protection.Lock()
 }
-$rcloneExe = Join-Path $env:APPDATA 'Playnite/ExtensionsData/e8b2f7a1-8c3d-4f5e-9a6b-1c2d3e4f5a6b/Tools/rclone.exe'
+$rcloneExe = Join-Path $env:APPDATA 'Playnite/ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767/runtime/rclone.exe'
 if (!(Test-Path $rcloneExe)) { throw 'Set rcloneExe to your installed Rclone executable for the probe' }
 # This fixture represents joining an established vault, whose metadata areas exist.
 # Avoid spending rclone's missing-directory retry window on an unrelated cold-vault case.
