@@ -1,0 +1,89 @@
+{
+  "version": "0.6.0",
+  "date": "2026-10-23",
+  "regressionPassed": 299.0,
+  "regressionFailed": 0,
+  "suites": [
+    {
+      "suite": "ActivityTests",
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "suite": "ApplicationLockTests",
+      "passed": 15,
+      "failed": 0
+    },
+    {
+      "suite": "AuditTests",
+      "passed": 8,
+      "failed": 0
+    },
+    {
+      "suite": "CrashRecoveryTests",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "suite": "HltbTests",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "suite": "MetadataTransferTests",
+      "passed": 8,
+      "failed": 0
+    },
+    {
+      "suite": "RuntimeTests",
+      "passed": 4,
+      "failed": 0
+    },
+    {
+      "suite": "SaveManagerReplacementTests",
+      "passed": 42,
+      "failed": 0
+    },
+    {
+      "suite": "SecurityTests",
+      "passed": 9,
+      "failed": 0
+    },
+    {
+      "suite": "SetupTests",
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "suite": "StreamingTests",
+      "passed": 17,
+      "failed": 0
+    },
+    {
+      "suite": "Tests",
+      "passed": 61,
+      "failed": 0
+    },
+    {
+      "suite": "VaultTests",
+      "passed": 64,
+      "failed": 0
+    }
+  ],
+  "setupTerminationCases": 4,
+  "retirementCases": 9,
+  "desktopReplacementAssertions": 47,
+  "fullscreenReplacementAssertions": 47,
+  "longPathReplacementCases": 42,
+  "legacyArchivesRestored": 9,
+  "legacySourceFilesUnchanged": true,
+  "liveGameSavesWritten": false,
+  "driveWanPassed": true,
+  "providersWithLiveTransferAcceptance": [
+    "Google Drive"
+  ],
+  "normalProfileMigrated": false,
+  "oldSaveManagerRemoved": false,
+  "unavailableLegacyZip": "Backup_20261018_171913.zip",
+  "candidateDllSha256": "0CB155D874E74834DA6C85F7B062BA02AD00690401B3756A2AFEC307B766CD63"
+}

@@ -25,6 +25,7 @@ namespace PlaytimeRclone
                 var step=onboarding.SetupStep;
                 var names=new[]{"Welcome","Storage","Games and saves","Your choices","Ready"};
                 var panel=Page(window,names[step],"Step "+(step+1)+" of 5");
+                Label(panel,"Your setup choices are saved. Close this window to continue later.",13,true);
                 if(step==0)
                 {
                     var intro=Card(panel,"Your progress, in your own cloud","");
@@ -121,7 +122,6 @@ namespace PlaytimeRclone
                     finish=Button(footer,"Finish setup",()=>{onboarding.SetupComplete=true;SaveOnboarding();window.Close();if(!IsSyncPaused)QueueSync();});
                     StyleAction(finish,true);finish.IsEnabled=syncing==0&&!walkthroughWorking&&!connectionTesting;
                 }
-                Button(footer,"Continue later",()=>window.Close());
             };
             refresh.Tick+=(_,e)=>{
                 if(progress!=null)progress.Text=status;

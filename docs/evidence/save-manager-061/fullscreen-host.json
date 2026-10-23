@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "runtime": {
+    "passed": true,
+    "mode": "Fullscreen",
+    "callbacks": 2,
+    "interruptedRestoreRecovered": true,
+    "runningHistoryRestoresRejected": 2,
+    "elapsedSeconds": 16,
+    "ledgerSessionSeconds": 16,
+    "displayedPlaytime": 116,
+    "expectedPlaytime": 116,
+    "launches": [
+      "cloud-before-launch",
+      "session-1"
+    ],
+    "launchMilliseconds": [
+      1371,
+      774
+    ],
+    "saveHead": "session-2",
+    "allRevisionsUploaded": true,
+    "restoreBackups": 1,
+    "favorite": true,
+    "notes": "Preferences from the second device",
+    "settingsViewCreated": true,
+    "backgroundUiHeartbeats": 195,
+    "game": "Synthetic Cloud Trail fixture; not a commercial game",
+    "appVersion": "10.63.0.0"
+  },
+  "visual": {
+    "passed": true,
+    "stoppedHistoryRestoreVerified": true,
+    "navigationStable": true,
+    "gameManagerVerified": true,
+    "unsavedDraftPreserved": true,
+    "cancelledLaunch": true,
+    "cloudChoiceVerified": true,
+    "localChoiceVerified": true,
+    "conflictResolutions": 2,
+    "remainingSaveHeads": 1,
+    "callbacks": 2,
+    "restored": "cloud-choice-after-conflict",
+    "screenshots": [
+      "demo-library.png",
+      "manage-games.png",
+      "manage-sync.png",
+      "conflict-cancel.png",
+      "conflict-resolve.png",
+      "conflict-local.png",
+      "settings.png",
+      "personal-account.png",
+      "devices.png",
+      "security.png"
+    ],
+    "method": "Actual Playnite WPF windows rendered by test-only in-process companion; buttons invoked via WPF test events, not Windows input automation"
+  },
+  "performance": {
+    "passed": true,
+    "warmSyncMilliseconds": 219,
+    "cacheUnchanged": true,
+    "noIdleSaveScans": true,
+    "idleBackoffVerified": true,
+    "cachedObjects": 18,
+    "backgroundUiHeartbeats": 203,
+    "progressWindowsObserved": 0,
+    "backend": "Rclone local alias; not a WAN/cloud latency benchmark"
+  }
+}

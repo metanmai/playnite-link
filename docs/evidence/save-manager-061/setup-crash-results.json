@@ -1,0 +1,26 @@
+[
+  {
+    "passed": true,
+    "boundary": "journal",
+    "restarts": 2,
+    "processKilled": true
+  },
+  {
+    "passed": true,
+    "boundary": "backup",
+    "restarts": 2,
+    "processKilled": true
+  },
+  {
+    "passed": true,
+    "boundary": "installed",
+    "restarts": 2,
+    "processKilled": true
+  },
+  {
+    "passed": true,
+    "boundary": "receipt",
+    "restarts": 2,
+    "processKilled": true
+  }
+]

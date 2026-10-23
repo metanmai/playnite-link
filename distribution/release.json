@@ -1,18 +1,5 @@
 {
-  "packageSha256": "d78c28035adb3bd538bbfa61f38962a2eb86dd2015893219ef6bb736e52b1721",
-  "superseded": [
-    {
-      "tag": "v0.5.4",
-      "id": 418246055
-    },
-    {
-      "tag": "v0.5.3",
-      "id": 418212744
-    },
-    {
-      "tag": "v0.5.2",
-      "id": 418150309
-    }
-  ],
-  "tag": "v0.5.11"
+  "packageSha256": "1644105d98e8dd9f78c3ac1a8e3a8aa57d1621ca7e0bc16a5f712033dc326edb",
+  "superseded": [],
+  "tag": "v0.6.1"
 }

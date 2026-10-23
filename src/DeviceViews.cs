@@ -12,6 +12,8 @@ namespace PlaytimeRclone
 {
     public sealed partial class PlaytimePlugin
     {
+        private bool refreshingDevices;
+        private string deviceRefreshStatus;
         private List<DeviceGame> DeviceGames()
         {
             var games=new List<DeviceGame>();
@@ -19,18 +21,24 @@ namespace PlaytimeRclone
             {
                 var game=PlayniteApi.Database.Games.Get(new Guid(pair.Key));if(game==null)continue;SaveLink link;vault.State.Links.TryGetValue(pair.Value.Key,out link);
                 games.Add(new DeviceGame{Key=pair.Value.Key,Name=GameLabel(pair.Value.Key,game.Name),SaveFolder=devicePreferences.SharePaths&&link!=null?link.Folder:null,
-                    SavesEnabled=devicePreferences.SyncSaves&&link!=null&&!String.IsNullOrWhiteSpace(link.Folder)});
+                    SavesEnabled=devicePreferences.SyncSaves&&link!=null&&link.HasSaves});
             }
             return games.OrderBy(g=>g.Key,StringComparer.Ordinal).ToList();
         }
         private void BuildDevices(Window window)
         {
             var me=repository.Snapshot().Device;
-            if(syncing==0){if(!devices.Heads(me,"profile").Any())devices.PublishProfile(me,devicePreferences,DeviceGames(),true);deviceViewCache=devices.Views().ToArray();}
+            if(syncing==0){if(!devices.Heads(me,"profile").Any()&&devices.EffectiveState(me)!="removed")devices.PublishProfile(me,devicePreferences,DeviceGames(),true);deviceViewCache=devices.Views().ToArray();}
             var panel=Page(window,"Your devices","","Devices");
-            var toolbar=Actions(panel);Button(toolbar,"Refresh devices",()=>RefreshDevices());
+            var toolbar=Actions(panel);var refresh=Button(toolbar,refreshingDevices?"Refreshing…":"Refresh devices",()=>RefreshDevices());refresh.IsEnabled=!refreshingDevices;
+            if(!String.IsNullOrWhiteSpace(deviceRefreshStatus))Label(panel,deviceRefreshStatus,13,true);
             Label(panel,syncing!=0?"Sync is running. This is the last received device list.":"Last seen shows the last check-in, not live online status.",13,true);
-            foreach(var item in deviceViewCache.OrderByDescending(d=>d.Id==me).ThenBy(d=>d.Name))
+            if(devices.EffectiveState(me)=="removed")
+            {
+                var disconnected=Card(panel,"This device is disconnected","This device was removed from synchronization. Connect it again only if you want to use it.");
+                Button(disconnected,"Connect this device again",()=>ApplyDeviceChange(()=>devices.SetState(me,me,"active")));
+            }
+            foreach(var item in deviceViewCache.Where(d=>d.State!="removed").OrderByDescending(d=>d.Id==me).ThenBy(d=>d.Name))
             {
                 var device=item;var card=Card(panel,device.Name+(device.Id==me?"  ·  This device":""));
                 DateTimeOffset last;var seen=DateTimeOffset.TryParse(device.LastSeen,out last)?last.ToLocalTime().ToString("g"):"Not checked in yet";
@@ -44,13 +52,13 @@ namespace PlaytimeRclone
                 if(device.State=="active")Button(actions,"Pause sync",()=>{ChangeDeviceState(device,"paused");});
                 else Button(actions,"Resume sync",()=>{ChangeDeviceState(device,"active");});
                 var advanced=new StackPanel();Label(advanced,"Device ID: "+device.Id,12,true);
-                if(device.State!="removed")Button(advanced,"Remove device…",()=> {
-                    if(PlayniteApi.Dialogs.ShowMessage("Remove "+device.Name+" from Playnite Link synchronization?\n\nThe client will stop data synchronization when it next checks in. This does not erase downloaded files or revoke Google/Dropbox/OneDrive credentials. Revoke cloud authorization at your provider for a lost device.","Remove connected device",MessageBoxButton.YesNo)==MessageBoxResult.Yes)
+                if(device.State!="removed")Button(actions,"Remove device…",()=> {
+                    if(PlayniteApi.Dialogs.ShowMessage("Remove "+device.Name+" from your connected devices?\n\nYour synced saves and playtime will stay in the vault. The device will disappear from this list and stop synchronization when it next checks in. A removal record prevents stale check-ins from adding it again. This does not erase copies on that device or revoke its cloud credentials.","Remove connected device",MessageBoxButton.YesNo)==MessageBoxResult.Yes)
                     {ChangeDeviceState(device,"removed");}
                 });
-                Details(card,"Device details & removal",advanced);
+                Details(card,"Device details",advanced);
             }
-            if(deviceViewCache.Length==0)Card(panel,"No devices yet","Connect cloud storage from Overview, then refresh this list.");
+            if(!deviceViewCache.Any(d=>d.State!="removed"))Card(panel,"No connected devices","Connect cloud storage from Overview, then refresh this list.");
             Label(panel,"To revoke cloud access, remove the device’s authorization with your storage provider.",13,true);
         }
         private void ChangeDeviceState(DeviceView device,string state)
@@ -112,6 +120,7 @@ namespace PlaytimeRclone
         }
         private Task RestoreHistoryCoreAsync(string key,Revision revision)
         {
+            if(MigrationBlocksSync)throw new IOException("Finish migration and restart Playnite before restoring with Link.");
             var game=UI(()=>{
                 var mapping=repository.Snapshot().Mappings.Single(p=>p.Value.Key==key);
                 var id=new Guid(mapping.Key);
@@ -126,15 +135,16 @@ namespace PlaytimeRclone
                     try
                     {
                         if(UI(()=>GameBusy(game)))throw new InvalidOperationException("Stop the game before restoring save history.");
-                        var link=Link(key);var local=blobs.Capture(link.Folder);var data=blobs.ImportLegacy(revision.Data);
-                        LastBackup=blobs.Restore(link.Folder,data,Revision.ContentHashOf(local),()=>UI(()=>{
+                        var link=Link(key);var plan=Plan(PlayniteApi.Database.Games.Get(game),key);var local=plan.Capture();var data=blobs.ImportLegacy(revision.Data);var projected=plan.Filter(data);
+                        LastBackup=plan.Restore(data,Revision.ContentHashOf(local),()=>UI(()=>{
                             if(GameBusy(game))throw new IOException("The game is starting or running; history restore deferred.");
                             restoringSaves.Add(game);
                         }));
-                        var next=new Revision{Version=2,Game=key,Kind="save",Device=repository.Snapshot().Device,Data=data,Parents=vault.Heads(key,"save").Select(h=>h.Hash()).OrderBy(h=>h,StringComparer.Ordinal).ToList()};
-                        vault.Add(next);link.Save.Revision=next.Hash();link.Save.Content=next.ContentHash();vault.Save();
+                        var next=new Revision{Version=data.Keys.Any(k=>k.StartsWith(SavePlan.Mounts,StringComparison.Ordinal))?3:2,Game=key,Kind="save",Device=repository.Snapshot().Device,Data=data,Parents=vault.Heads(key,"save").Select(h=>h.Hash()).OrderBy(h=>h,StringComparer.Ordinal).ToList()};
+                        vault.Add(next);link.Save.Revision=next.Hash();link.Save.Content=Revision.ContentHashOf(projected);vault.Save();
                     }finally{UI(()=>restoringSaves.Remove(game));Interlocked.Exchange(ref syncing,0);syncGate.Release();}
                 });
         }
     }
 }
+

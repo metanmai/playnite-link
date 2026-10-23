@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "multiSourceCloudRestore": true,
+  "namedZipSha256RoundTrip": true,
+  "offlineConflictPreserved": true,
+  "cancelPreservesSaves": true,
+  "explicitResolutionConverges": true,
+  "sessionSeconds": 79,
+  "deviceReceiptsConverge": true,
+  "metadataNamespaces": 6,
+  "liveGameFilesWritten": false
+}

@@ -1,6 +1,17 @@
 # Reuse and dependencies
 
-Playnite Link adapts the user's earlier PlaytimeRclone project (MIT): ledger, Rclone transport, settings, enrollment, recovery and test harness. Original license retained in `vendor/PlaytimeRclone-LICENSE` and the MIT license accompanying this project. The internal namespace remains `PlaytimeRclone` to keep the reused engine and tests compatible.
+This combined distribution is licensed under GNU AGPL-3.0 (LICENSE).
+Save Manager by Jurangren, pinned at c879d81bd864b23ab903dd2a62ecf30063bda518,
+is included as source in vendor/SaveManager and as SaveManager.Core.dll.
+See vendor/SaveManager/UPSTREAM.md for provenance and integration details.
+Original Link MIT terms are preserved in vendor/PlayniteLink-MIT-LICENSE.
+
+Microsoft.Toolkit.Uwp.Notifications 7.1.3 (.NET Foundation and contributors), MIT,
+is bundled for the reused Save Manager Windows notification service. Its notice
+is included as Notifications-LICENSE.md. Build downloads the pinned NuGet package
+and verifies SHA-256 B328139AD101CCB810E9D8741E9ABF0B3F71F9D70397BDFEF6668EBD9BCD6C5E.
+
+Playnite Link adapts the user's earlier PlaytimeRclone project (MIT): ledger, Rclone transport, settings, enrollment, recovery and test harness. Original license retained in `vendor/PlaytimeRclone-LICENSE`. The internal namespace remains `PlaytimeRclone` to keep the reused engine and tests compatible.
 
 - [Playnite SDK](https://api.playnite.link/docs/tutorials/extensions/plugins.html), MIT. Referenced from the installed Playnite; not redistributed in the extension.
 - [Newtonsoft.Json](https://www.newtonsoft.com/json), MIT. Uses the copy supplied by Playnite; not redistributed in the extension.

@@ -46,7 +46,9 @@ public sealed class HostProbe:GenericPlugin
   var choice=subject.GetType().GetMethod("AskCloudQuestion",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(subject,new object[]{new CloudQuestion{Boolean=true,Help="Use the selected account?",Name="synthetic-choice"}});Check((string)choice=="false","No button did not send false");
   phase="resume walkthrough";
   // Closing setup retains the current step and never begins network work.
-  Click(w,"Continue later");Check(Wizard()==null,"Continue later failed");
+  Check(!Elements<Button>(w).Any(b=>Convert.ToString(b.Content)=="Continue later"),"Duplicate Continue later button remains");
+  Check(Elements<TextBlock>(w).Any(t=>t.Text.Contains("Close this window to continue later")),"Close-and-resume guidance missing");
+  w.Close();Check(Wizard()==null,"Window close failed");
   var saved=JsonConvert.DeserializeObject<OnboardingOptions>(File.ReadAllText(Path.Combine(data,"onboarding.json")));Check(saved.SetupStep==1&&!saved.SetupComplete,"Wizard progress not saved");
   PlayniteApi.MainView.UIDispatcher.BeginInvoke(new Action(()=>subject.GetMainMenuItems(new GetMainMenuItemsArgs()).Single(m=>m.Description=="Setup walkthrough").Action(null)));
   await Until(()=>Wizard()!=null);w=Wizard();Check(Elements<TextBlock>(w).Any(t=>t.Text=="Storage"),"Wizard did not resume at storage");

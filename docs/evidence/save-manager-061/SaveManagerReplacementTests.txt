@@ -1,0 +1,45 @@
+PASS Save Manager core creates, reloads, notes, imports and CRC-verifies ZIPs
+PASS same-second Save Manager backups never overwrite a previous ZIP
+PASS retention keeps named backups and only prunes automatic ZIPs
+PASS two same-named folders and a single file survive core ZIP round trip
+PASS portable game paths follow a relocated installation
+PASS emulator and profile path variables preserve directory boundaries
+PASS legacy backup preferences and per-game root overrides migrate
+PASS provider configuration preserves backend and masked credential continuation / drive
+PASS provider configuration preserves backend and masked credential continuation / dropbox
+PASS provider configuration preserves backend and masked credential continuation / onedrive
+PASS provider configuration preserves backend and masked credential continuation / pcloud
+PASS provider configuration preserves backend and masked credential continuation / webdav
+PASS provider configuration preserves backend and masked credential continuation / s3
+PASS real Rclone creates a separate native provider configuration / webdav
+PASS real Rclone creates a separate native provider configuration / s3
+PASS explicit cloud erasure is confined to the chosen vault's protocol area
+PASS erasure scope rejects empty and option-like destinations
+PASS failed core configuration commit preserves the last committed in-memory configuration
+PASS partial and missing save sources can preserve a pre-restore backup
+PASS multi-root restore changes every source and handles file deletion
+PASS restore exclusions preserve settings and do not create repeated cloud conflicts
+PASS restore exclusions never delete a peer's unexcluded settings from published snapshots
+PASS removing or changing a source cannot erase a peer's differently configured roots
+PASS source declarations are validated and are never installed as real save files
+PASS an empty or missing individual source requires review even when other sources have saves
+PASS missing excluded files remain local without deleting their previous shared bytes
+PASS folder exclusions preserve descendants without matching neighboring folder names
+PASS overlapping roots and unknown cloud sources fail before writes
+PASS single save files directly in Documents can be selected without syncing other files
+PASS unsafe ZIP paths, duplicate names and undeclared source files are rejected
+PASS plain ZIP imports normalize into Save Manager's supported archive format
+PASS Save Manager full ZIP export maps configuration and nested backups
+PASS migration copies are hash verified and missing copies block retirement
+PASS sync receipts order by sequence, survive restart and reject duplicate sequence claims
+PASS stale, pending, playing and behind devices never claim current synchronization
+PASS malformed receipt and modified receipt hash are rejected
+PASS large libraries report configured saves and one disable transition, not unrelated games
+PASS confirmation imports only uploaded receipts, never abandoned outbox history
+PASS multi-root format uses version 3 and older snapshots remain readable
+PASS cloud backup catalog merges concurrent notes and explicit deletion without losing history
+PASS malformed cloud backup ancestry and altered archives metadata cannot import
+PASS batched metadata includes validated backup and receipt records
+PASS abrupt kill between save roots rolls back all roots on two restarts / 1
+PASS abrupt kill between save roots rolls back all roots on two restarts / 2
+RESULT 44 passed, 0 failed

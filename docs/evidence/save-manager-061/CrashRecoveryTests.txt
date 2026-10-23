@@ -1,0 +1,12 @@
+PASS abrupt kill + two restarts: existing root / staged
+PASS abrupt kill + two restarts: existing root / journal
+PASS abrupt kill + two restarts: existing root / backup
+PASS abrupt kill + two restarts: existing root / installed
+PASS abrupt kill + two restarts: existing root / committed
+PASS abrupt kill + two restarts: absent root / staged
+PASS abrupt kill + two restarts: absent root / journal
+PASS abrupt kill + two restarts: absent root / backup
+PASS abrupt kill + two restarts: absent root / installed
+PASS abrupt kill + two restarts: absent root / committed
+PASS malformed journal fails closed and is preserved
+11 passed, 0 failed

@@ -1,0 +1,19 @@
+PASS existing detailed history is adopted without adding baseline time twice
+PASS cloned old history on two devices has one stable identity
+PASS independent old histories merge without losing disjoint sessions
+PASS native local session is bound instead of imported twice
+PASS ten repeated sync projections never create duplicate sessions
+PASS restart retains binding receipts
+PASS busy native writer is deferred without touching data
+PASS conflicting historical duration fails closed across peers
+PASS native and ledger duration disagreement cannot become another session
+PASS externally edited imported session is preserved for review
+PASS externally removed imported session is not silently recreated
+PASS ambiguous duplicate timestamps require review
+PASS failed destination write can retry exactly once
+PASS missing receipt after a crash adopts exact existing session
+PASS old ledger canonical serialization remains byte compatible
+PASS new history stays out of the legacy ledger namespace
+PASS separate metadata areas converge counts and history repeatedly
+PASS copied foreign native row with lost receipt cannot become a duplicate
+RESULT 18 passed, 0 failed

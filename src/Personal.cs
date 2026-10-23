@@ -51,7 +51,7 @@ namespace PlaytimeRclone
         private readonly HashSet<Guid> launchReservations = new HashSet<Guid>();
         private readonly HashSet<Guid> restoringSaves = new HashSet<Guid>();
         private HashSet<string> savedConflicts=new HashSet<string>();
-        private HashSet<string> ReadSaveConflicts(){return new HashSet<string>(vault.State.Links.Where(p=>!String.IsNullOrWhiteSpace(p.Value.Folder)&&vault.Heads(p.Key,"save").Count>1).Select(p=>p.Key));}
+        private HashSet<string> ReadSaveConflicts(){return new HashSet<string>(vault.State.Links.Where(p=>p.Value.HasSaves&&vault.Heads(p.Key,"save").Count>1).Select(p=>p.Key));}
         private bool GameBusy(Guid id){var game=PlayniteApi.Database.Games.Get(id);return launchReservations.Contains(id)||game==null||game.IsRunning||game.IsLaunching;}
         private bool CachedSaveConflict(Game game,Mapping map)
         {
@@ -59,7 +59,7 @@ namespace PlaytimeRclone
             if(!devicePreferences.SyncSaves)return false;
             if(savedConflicts.Contains(map.Key))return true;
             if(!syncGate.Wait(0))return false;
-            try{SaveLink link;return vault.State.Links.TryGetValue(map.Key,out link)&&!String.IsNullOrWhiteSpace(link.Folder)&&vault.Heads(map.Key,"save").Count>1;}
+            try{SaveLink link;return vault.State.Links.TryGetValue(map.Key,out link)&&link.HasSaves&&vault.Heads(map.Key,"save").Count>1;}
             finally{syncGate.Release();}
         }
         private async void ReleaseLaunchReservation(Guid id)
@@ -138,15 +138,16 @@ namespace PlaytimeRclone
         }
         private SortedDictionary<string,string> Preferences(Game game)
         { return new SortedDictionary<string,string>(StringComparer.Ordinal) { {"Favorite",game.Favorite.ToString()}, {"Hidden",game.Hidden.ToString()}, {"Notes",game.Notes??""} }; }
-        private void RecordLocal(string game,string kind,SortedDictionary<string,string> data,Checkpoint checkpoint)
+        private void RecordLocal(string game,string kind,SortedDictionary<string,string> data,Checkpoint checkpoint,SortedDictionary<string,string> fullSave=null)
         {
             var hash=Revision.ContentHashOf(data);
             if(hash==checkpoint.Content)return;
             // First contact must compare with the remote before publishing a new root.
             if(checkpoint.Revision==null)return;
             // An empty folder may mean an unavailable disk or a wrong path; require review.
-            if(kind=="save" && data.Count==0)return;
-            var revision=new Revision { Version=kind=="save"?2:1,Game=game,Kind=kind,Device=repository.Snapshot().Device,Data=data,Parents=new List<string>{checkpoint.Revision} };
+            if(kind=="save" && !SavePlan.HasFiles(data))return;
+            var publication=fullSave??data;
+            var revision=new Revision { Version=kind=="save"?(publication.Keys.Any(k=>k.StartsWith(SavePlan.Mounts,StringComparison.Ordinal))?3:2):1,Game=game,Kind=kind,Device=repository.Snapshot().Device,Data=publication,Parents=new List<string>{checkpoint.Revision} };
             vault.Add(revision);checkpoint.Revision=revision.Hash();checkpoint.Content=hash;vault.Save();
         }
         private void SeedHistoryCache(string destination)
@@ -174,11 +175,12 @@ namespace PlaytimeRclone
                 if(UI(()=>GameBusy(item.Game.Id)))continue;
                 SaveLink link;if(!vault.State.Links.TryGetValue(item.Key,out link))continue;
                 if(devicePreferences.SyncPreferences)RecordLocal(item.Key,"preferences",item.Preferences,link.Preferences);
-                if(devicePreferences.SyncSaves&&!String.IsNullOrWhiteSpace(link.Folder)){var captured=blobs.Capture(link.Folder);if(!UI(()=>GameBusy(item.Game.Id)))RecordLocal(item.Key,"save",captured,link.Save);}
+                if(devicePreferences.SyncSaves&&link.HasSaves){var plan=Plan(item.Game,item.Key);var full=plan.Capture(true);var captured=plan.Filter(full);Revision previous;var all=vault.Read(vault.Objects);var known=link.Save.Revision!=null&&all.TryGetValue(link.Save.Revision,out previous);previous=known?all[link.Save.Revision]:null;if(previous!=null&&plan.NeedsSourceReview(previous.Data,captured))continue;var publication=previous==null?full:plan.ForPublication(full,previous.Data);if(!UI(()=>GameBusy(item.Game.Id)))RecordLocal(item.Key,"save",captured,link.Save,publication);}
             }
         }
         public System.Threading.Tasks.Task<bool> SyncPersonalAsync(bool interactive,Game launching,bool metadataOnly=false)
         {
+            if(MigrationBlocksSync)throw new InvalidOperationException("Finish Save Manager migration and restart Playnite before syncing with Link. This prevents two save tools from managing the same game.");
             if(vaultSwitchPending)throw new InvalidOperationException("Restart Playnite to finish switching vaults before syncing.");
             if(interactive)UI(()=>ResumeTransfers());
             else if(IsSyncPaused)return System.Threading.Tasks.Task.FromResult(false);
@@ -214,6 +216,8 @@ namespace PlaytimeRclone
                     new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1",cancelled:()=>closing||TransferStopped,progress:p=>ReportStatus(p.Downloaded>0?p.Downloaded+" records downloaded":"",SyncDisplayState.Working,"Downloading cloud history")).PullMetadata(metadataCache);
                     var deviceCache=Path.Combine(metadataCache,"devices","objects");Directory.CreateDirectory(deviceCache);
                     CheckTransfer();devices.Import(deviceCache);
+                    SyncReceipts.Import(Path.Combine(metadataCache,"receipts","objects"));
+                    var backupCache=Path.Combine(metadataCache,"backups","objects");CloudBackups.Import(backupCache);
                     var requested=devices.Heads(me,"settings");
                     if(requested.Count==1)
                     {
@@ -225,32 +229,34 @@ namespace PlaytimeRclone
                     deviceViewCache=devices.Views().ToArray();
                     deviceTransport.PushFiles(devices.Objects,Directory.GetFiles(devices.Objects,"*.json").Select(Path.GetFileName).Where(n=>!File.Exists(Path.Combine(deviceCache,n))));
                     if(deviceState!="active"||requested.Count>1||(!interactive&&!devicePreferences.AutoSync))
-                    {ReportStatus("Device "+deviceState+(requested.Count>1?"; settings need review":"")+". Local saves remain available.",SyncDisplayState.Review,"Device sync unavailable");return true;}
+                    {ReportStatus("Device "+deviceState+(requested.Count>1?"; settings need review":"")+". Local saves remain available.",SyncDisplayState.Review,"Device sync unavailable");return launching==null||UI(()=>PlayniteApi.Dialogs.ShowMessage("This device cannot sync right now. Play offline with local saves? Another device may have newer progress.","Playnite Link",MessageBoxButton.YesNo)==MessageBoxResult.Yes);}
                     var blobTransport=new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||TransferStopped);
                     blobs.Fetch=names=>blobTransport.PullFiles(blobs.DirectoryPath,names);
+                    if(devicePreferences.SyncSaves)SeedLocalBackupCatalog(games);
                     vault.UpgradeLegacySaves(blobs,me);
                     if(!metadataOnly)CaptureLocalChanges(games);
                     var transport=new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/revisions/objects",cancelled:()=>closing||TransferStopped);
                     var incoming=Path.Combine(metadataCache,"revisions","objects");Directory.CreateDirectory(incoming);
                     // Persistent caches let Rclone skip objects already downloaded. No history is deleted.
                     CheckTransfer();ReportStatus("",SyncDisplayState.Working,"Combining playtime and sessions");
+                    var sentSessions=repository.Snapshot().Entries;
                     if(devicePreferences.SyncPlaytime)new SyncEngine().Run(repository,new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,cancelled:()=>closing||TransferStopped),Path.Combine(Root,"scratch"),Path.Combine(metadataCache,"ledger","objects"),false,false);
                     if(devicePreferences.SyncPlaytime)new SyncEngine().Run(repository,new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/activity/objects",cancelled:()=>closing||TransferStopped),Path.Combine(Root,"scratch"),Path.Combine(metadataCache,"activity","objects"),true,false);
                     vault.Import(incoming);var review=ReadSaveConflicts();UI(()=>savedConflicts=review);
                     if(metadataOnly)
                     {
-                        var pendingLocal=vault.Read(vault.Objects).Any(p=>((p.Value.Kind=="save"&&devicePreferences.SyncSaves)||(p.Value.Kind=="preferences"&&devicePreferences.SyncPreferences))&&!File.Exists(Path.Combine(incoming,p.Key+".json")));
+                        var pendingLocal=vault.Read(vault.Objects).Any(p=>((p.Value.Kind=="save"&&devicePreferences.SyncSaves)||(p.Value.Kind=="preferences"&&devicePreferences.SyncPreferences))&&!File.Exists(Path.Combine(incoming,p.Key+".json")))||(devicePreferences.SyncSaves&&CloudBackups.Read().Any(p=>!File.Exists(Path.Combine(backupCache,p.Key+".json"))));
                         var preferencesChanged=devicePreferences.SyncPreferences&&games.Any(item=>{
                             SaveLink link;return vault.State.Links.TryGetValue(item.Key,out link)&&Revision.ContentHashOf(item.Preferences)!=link.Preferences.Content;
                         });
                         var unappliedRemote=games.Any(item=>{
                             SaveLink link;if(!vault.State.Links.TryGetValue(item.Key,out link))return true;
-                            return (devicePreferences.SyncSaves&&!String.IsNullOrWhiteSpace(link.Folder)&&vault.Heads(item.Key,"save").Any(r=>r.Hash()!=link.Save.Revision))||
+                            return (devicePreferences.SyncSaves&&link.HasSaves&&vault.Heads(item.Key,"save").Any(r=>r.Hash()!=link.Save.Revision))||
                                 (devicePreferences.SyncPreferences&&vault.Heads(item.Key,"preferences").Any(r=>r.Hash()!=link.Preferences.Revision));
                         });
                         if(!pendingLocal&&!preferencesChanged&&!unappliedRemote)
                         {
-                            await ProjectAsync();ReportStatus("",SyncDisplayState.Working,"Finishing sync");await SyncOnlineHltb();TrySyncSetup();var reviewNeeded=projectionFailures>0||UI(()=>activityReview.Count>0)||review.Count>0;ReportStatus(reviewNeeded?"Choose a version to continue.":"",reviewNeeded?SyncDisplayState.Review:SyncDisplayState.Completed,reviewNeeded?"Review needed":"Up to date");idleUnchanged=true;completed=true;return true;
+                            await ProjectAsync();ReportStatus("",SyncDisplayState.Working,"Finishing sync");await SyncOnlineHltb();TrySyncSetup();var reviewNeeded=projectionFailures>0||UI(()=>activityReview.Count>0)||review.Count>0;ReportStatus(reviewNeeded?"Choose a version to continue.":"Local save files are checked by a full sync before launch or when you choose Sync now.",reviewNeeded?SyncDisplayState.Review:SyncDisplayState.Completed,reviewNeeded?"Review needed":"Cloud checked");idleUnchanged=true;completed=true;return true;
                         }
                         CaptureLocalChanges(games);
                     }
@@ -264,15 +270,16 @@ namespace PlaytimeRclone
                         if(UI(()=>GameBusy(item.Game.Id)))continue;
                         var game=item.Game;var link=Link(item.Key);
                         Func<Conflict,string> choose=c=>interactive?UI(()=>ChooseConflict(game,c)):"cancel";
-                        if(devicePreferences.SyncSaves&&!String.IsNullOrWhiteSpace(link.Folder))
+                        if(devicePreferences.SyncSaves&&link.HasSaves)
                         {
-                            var local=blobs.Capture(link.Folder);var hash=Revision.ContentHashOf(local);
+                            var plan=Plan(game,item.Key);var full=plan.Capture(true);var local=plan.Filter(full);var hash=Revision.ContentHashOf(local);
+                            Revision previous;var known=vault.Read(vault.Objects);previous=link.Save.Revision!=null&&known.ContainsKey(link.Save.Revision)?known[link.Save.Revision]:null;var sourceReview=previous!=null&&plan.NeedsSourceReview(previous.Data,local);var publication=previous==null?full:plan.ForPublication(full,previous.Data);
                             var reconciled=false;
                             try
                             {
                                 var outcome=vault.Reconcile(item.Key,"save",repository.Snapshot().Device,local,link.Save,choose,data=> {
-                                    LastBackup=blobs.Restore(link.Folder,data,hash,()=>UI(()=>{if(GameBusy(game.Id))throw new IOException("The game is starting or running; restore deferred.");restoringSaves.Add(game.Id);}));
-                                });
+                                    LastBackup=plan.Restore(data,hash,()=>UI(()=>{if(GameBusy(game.Id))throw new IOException("The game is starting or running; restore deferred.");restoringSaves.Add(game.Id);}));
+                                },plan.Filter,_=>publication,sourceReview);
                                 reconciled=!outcome.Cancelled;
                                 if(outcome.Cancelled){cancelled=true;if(launching!=null&&game.Id==launching.Id){ReportStatus("Choose a save version before launching this game.",SyncDisplayState.Review,"Save choice needed");return false;}}
                             }
@@ -296,6 +303,8 @@ namespace PlaytimeRclone
                         CheckTransfer();ReportStatus("",SyncDisplayState.Working,"Uploading saves");blobTransport.PushFiles(blobs.DirectoryPath,needed);
                     }
                     CheckTransfer();transport.PushFiles(vault.Objects,pending.Select(p=>p.Key+".json"));
+                    if(devicePreferences.SyncSaves)PublishCloudBackups(blobTransport,backupCache);
+                    PublishGameSyncReceipts(sentSessions);
                     await ProjectAsync();
                     UI(()=> {
                         savedConflicts.UnionWith(ReadSaveConflicts());
@@ -321,16 +330,16 @@ namespace PlaytimeRclone
             string choice="cancel";
             var saves=conflict.Kind=="save";
             var window=Window("Cloud conflict — "+game.Name,680,620);var panel=Page(window,saves?"Which saves do you want to use?":"Which game details do you want to use?",game.Name);
-            Label(panel,"Both devices changed. The other version will be kept in history.",14,true);
+            Label(panel,conflict.MissingSource?"A save location became empty or unavailable. Review the complete save set before replacing another device's progress. Other versions remain in history.":"Both devices changed. The other version will be kept in history.",14,true);
             var localVersion=conflict.Heads.FirstOrDefault(r=>r.ContentHash()==conflict.LocalHash);
-            var localInfo=localVersion==null?null:DateTimeOffset.Parse(localVersion.CreatedUtc).ToLocalTime().ToString("g")+" · "+localVersion.Data.Count+(saves?" files":" fields");
+            var localInfo=localVersion==null?null:DateTimeOffset.Parse(localVersion.CreatedUtc).ToLocalTime().ToString("g")+" · "+(saves?SavePlan.FileCount(localVersion.Data):localVersion.Data.Count)+(saves?" files":" fields");
             var local=Card(panel,"This device",conflict.EmptyLocal?"This save folder is empty.":localInfo);
             Button(local,saves?(conflict.EmptyLocal?"Keep empty local folder":"Keep local saves"):"Keep local details",()=>{choice="local";window.Close();});
             foreach(var revision in conflict.Heads.Where(r=>r.ContentHash()!=conflict.LocalHash))
             {
                 var captured=revision;var device=devices.Views().FirstOrDefault(d=>d.Id==revision.Device);
                 DateTimeOffset date;var when=DateTimeOffset.TryParse(revision.CreatedUtc,out date)?date.ToLocalTime().ToString("g"):"";
-                var cloud=Card(panel,"Cloud"+(device==null?"":" · "+device.Name),when+" · "+revision.Data.Count+(saves?" files":" fields"));
+                var cloud=Card(panel,"Cloud"+(device==null?"":" · "+device.Name),when+" · "+(saves?SavePlan.FileCount(revision.Data):revision.Data.Count)+(saves?" files":" fields"));
                 var pick=Button(cloud,saves?"Use cloud saves":"Use cloud details",()=>{choice=captured.Hash();window.Close();});pick.Tag=revision.Hash();
             }
             Button(Footer(window),"Decide later",()=>window.Close());window.ShowDialog();return choice;
@@ -352,7 +361,8 @@ namespace PlaytimeRclone
                 if(!String.IsNullOrWhiteSpace(link.Folder) && !String.Equals(folder,link.Folder,StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("This game already has a save root. Review its current history before moving it; use a separate device profile for a new location.");
                 if(!linking&&PlayniteApi.Dialogs.ShowMessage("Include save files from this folder?\n"+folder+"\n\nChoose only this game’s saves, and use one cloud-sync tool for this folder. Replacing saves keeps a local backup.","Playnite Link",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
-                link.Folder=folder;vault.Save();
+                var candidate=JsonSafety.Deserialize<SaveLink>(JsonConvert.SerializeObject(link));candidate.Folder=folder;candidate.Sources=new List<SaveSource>{new SaveSource{Id="main",Path=SavePaths.Portable(folder,game.InstallDirectory,link.EmulatorDirectory)}};ValidatePlan(game,candidate);
+                link.Folder=folder;link.Sources=candidate.Sources;vault.Save();
         }
         private void ManageSaves(Game game) { Manage(game); }
         private static bool Overlap(string a,string b)
@@ -363,10 +373,10 @@ namespace PlaytimeRclone
             Text(panel,"Every uploaded revision is preserved. Restoring history creates a new revision; later unseen branches still require review.");
             foreach(var r in vault.Read(vault.Objects).Values.Where(r=>r.Game==key&&r.Kind=="save").OrderByDescending(r=>r.CreatedUtc))
             {
-                var revision=r;Text(panel,r.CreatedUtc+" · device "+r.Device.Substring(0,8)+" · "+r.Data.Count+" files");
+                var revision=r;Text(panel,r.CreatedUtc+" · device "+r.Device.Substring(0,8)+" · "+SavePlan.FileCount(r.Data)+" files");
                 Button(panel,"Restore "+r.Hash().Substring(0,8),()=> {
                     if(syncing!=0)throw new InvalidOperationException("Wait for the background sync before restoring history.");
-                    var link=Link(key);if(String.IsNullOrWhiteSpace(link.Folder))throw new InvalidOperationException("Configure the save directory first.");
+                    var link=Link(key);if(!link.HasSaves)throw new InvalidOperationException("Configure the save paths first.");
                     if(PlayniteApi.Dialogs.ShowMessage("Restore this historical version and preserve the current folder as a backup?", "Playnite Link",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
                     window.Close();RestoreHistoryAsync(key,revision);
                 });
@@ -404,7 +414,7 @@ namespace PlaytimeRclone
             if(connected)
             {
                 var mappings=repository.Snapshot().Mappings;
-                var missing=mappings.Values.Count(m=>!vault.State.Links.ContainsKey(m.Key)||String.IsNullOrWhiteSpace(vault.State.Links[m.Key].Folder));
+                var missing=mappings.Values.Count(m=>!vault.State.Links.ContainsKey(m.Key)||!vault.State.Links[m.Key].HasSaves);
                 if(missing>0)Label(games,missing+" games without a save folder",13,true);
                 var manual=PlayniteApi.Database.Games.Count(g=>g.PluginId==Guid.Empty&&!mappings.ContainsKey(g.Id.ToString()));
                 if(manual>0)Label(games,manual+" games available to link",13,true);
@@ -429,11 +439,11 @@ namespace PlaytimeRclone
             var exe=config.RcloneExe;if(String.IsNullOrWhiteSpace(exe)||!File.Exists(exe))exe=Ask("Choose your installed rclone.exe:",exe);if(exe==null)return;
             if(!Path.IsPathRooted(exe)||!File.Exists(exe)||!exe.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Choose an existing rclone.exe.");
             string provider=null;
-            var providerWindow=Window("Choose cloud storage",620,440);var providerPanel=Page(providerWindow,"Choose your cloud","Your saves stay in your own storage. Your browser handles sign-in.");
-            foreach(var pair in new[]{new[]{"Google Drive","drive"},new[]{"Dropbox","dropbox"},new[]{"OneDrive","onedrive"}}){var choice=pair;Button(providerPanel,choice[0],()=>{provider=choice[1];providerWindow.Close();});}
+            var providerWindow=Window("Choose cloud storage",620,620);var providerPanel=Page(providerWindow,"Choose your cloud","Your saves stay in your own storage. Browser sign-in or endpoint credentials are handled on this device.");
+            foreach(var pair in new[]{new[]{"Google Drive","drive"},new[]{"Dropbox","dropbox"},new[]{"OneDrive","onedrive"},new[]{"WebDAV / Nextcloud","webdav"},new[]{"Cloudflare R2","s3"},new[]{"pCloud","pcloud"}}){var choice=pair;Button(providerPanel,choice[0],()=>{provider=choice[1];providerWindow.Close();});}
             Button(Footer(providerWindow),"Cancel",()=>providerWindow.Close());providerWindow.ShowDialog();
             if(provider==null)return;
-            if(provider!="drive"&&provider!="dropbox"&&provider!="onedrive")throw new ArgumentException("Unsupported provider.");
+            if(!new[]{"drive","dropbox","onedrive","webdav","s3","pcloud"}.Contains(provider))throw new ArgumentException("Unsupported provider.");
             Dictionary<string,string> initial=null;
             if(provider=="drive")
             {
@@ -444,15 +454,32 @@ namespace PlaytimeRclone
                 if(client==null||String.IsNullOrWhiteSpace((string)client["client_id"])||String.IsNullOrWhiteSpace((string)client["client_secret"]))throw new InvalidDataException("Choose a Google Desktop app client JSON file.");
                 initial=new Dictionary<string,string>{{"client_id",(string)client["client_id"]},{"client_secret",(string)client["client_secret"]}};
             }
+            else if(provider=="webdav"||provider=="s3")
+            {
+                initial=new Dictionary<string,string>();
+                Func<string,string,bool,string> question=(name,help,secret)=>{var value=AskCloudQuestion(new CloudQuestion{Name=name,Help=help,Secret=secret,Required=true});if(value==null)throw new OperationCanceledException();return secret?value:value.Trim();};
+                if(provider=="webdav")
+                {
+                    var endpoint=question("WebDAV URL","Enter your WebDAV endpoint, such as your Nextcloud remote.php/dav/files/user/ address.",false);Uri uri;if(!Uri.TryCreate(endpoint,UriKind.Absolute,out uri)||(uri.Scheme!="https"&&uri.Scheme!="http"))throw new ArgumentException("Enter a complete HTTP or HTTPS WebDAV URL.");
+                    initial["url"]=endpoint;initial["vendor"]="other";initial["user"]=question("WebDAV username","Account username.",false);initial["pass"]=question("WebDAV password","Account password or app password. Stored only in your local Rclone configuration.",true);
+                }
+                else
+                {
+                    var endpoint=question("R2 endpoint","Full HTTPS endpoint from your Cloudflare account, ending in r2.cloudflarestorage.com.",false);Uri uri;if(!Uri.TryCreate(endpoint,UriKind.Absolute,out uri)||uri.Scheme!="https")throw new ArgumentException("Enter a complete HTTPS R2 endpoint.");
+                    initial["provider"]="Cloudflare";initial["env_auth"]="false";initial["endpoint"]=endpoint;initial["access_key_id"]=question("R2 access key ID","Your bucket access key.",true);initial["secret_access_key"]=question("R2 secret access key","Stored only in your local Rclone configuration.",true);initial["no_check_bucket"]="true";
+                }
+            }
             var cfg=Path.Combine(Root,"personal-rclone-"+Guid.NewGuid().ToString("N").Substring(0,8)+".conf");
             var remote="personal";
-            ReportStatus("Complete your provider sign-in in the browser. You can cancel this connection from setup.",SyncDisplayState.Working,"Waiting for sign-in");
+            ReportStatus("Connecting storage. Browser providers may open sign-in. You can cancel this connection from setup.",SyncDisplayState.Working,"Connecting storage");
             await System.Threading.Tasks.Task.Run(()=>CloudAccount.Configure(exe,cfg,remote,provider,question=>UI(()=>AskCloudQuestion(question)),(message,action)=>{ReportStatus(message,SyncDisplayState.Working,"Connecting storage");action();},initial,()=>closing||connectionCancelled));
-            var folder=SelectedVaultFolder();
+            var folder=provider=="s3"?Ask("Enter the R2 bucket and vault folder (bucket/PlayniteLink).","bucket/PlayniteLink"):SelectedVaultFolder();
             SaveOnboarding();
             await SaveConnectionAsync(new SyncConfig {RcloneExe=exe,ConfigFile=cfg,RemoteFolder=remote+":"+folder});
         }
     }
 }
+
+
 
 

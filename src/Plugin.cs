@@ -154,10 +154,13 @@ namespace PlaytimeRclone
             var snapshot=repository.Snapshot();var map=snapshot.Mappings[game.Id.ToString()];var link=Link(map.Key);
             var summary=Card(panel,"Linked to your cloud",GameLabel(map.Key,game.Name));
             Label(summary,"Playtime and sessions included.",14,true);
-            var saves=Card(panel,"Save files",String.IsNullOrWhiteSpace(link.Folder)?"Choose a save folder to include saves.":"");
-            var folderText=Label(saves,String.IsNullOrWhiteSpace(link.Folder)?"Save files aren't included yet.":link.Folder,13,true);
-            var choose=Button(saves,String.IsNullOrWhiteSpace(link.Folder)?"Include save files…":"View save folder",()=>{});
-            choose.Click+=(_,e)=>Guard(()=>{if(!String.IsNullOrWhiteSpace(link.Folder)){System.Diagnostics.Process.Start(link.Folder);return;}var folder=PlayniteApi.Dialogs.SelectFolder();if(String.IsNullOrWhiteSpace(folder))return;SetSaveFolder(game,folder);if(!String.IsNullOrWhiteSpace(link.Folder)){folderText.Text=link.Folder;choose.Content="View save folder";QueueSync();}});
+            var primaryActions=Actions(summary);
+            StyleAction(Button(primaryActions,"Save manager…",()=>ShowSaveManager(game,map.Key)),true);
+            Button(primaryActions,"Sessions & device sync status…",()=>ShowGameSyncHistory(game));
+            var saves=Card(panel,"Save files",link.HasSaves?"":"Choose save paths to include saves.");
+            var folderText=Label(saves,!link.HasSaves?"Save files aren't included yet.":link.Sources!=null&&link.Sources.Count>0?String.Join("\n",link.Sources.Select(s=>s.Path)):link.Folder,13,true);
+            var choose=Button(saves,link.HasSaves?(String.IsNullOrWhiteSpace(link.Folder)?"Save paths & options…":"View save folder"):"Include save files…",()=>{});
+            choose.Click+=(_,e)=>Guard(()=>{if(link.HasSaves){if(String.IsNullOrWhiteSpace(link.Folder)){ShowSavePaths(game,map.Key);return;}System.Diagnostics.Process.Start(Plan(game,map.Key).Sources[0].Path);return;}var folder=PlayniteApi.Dialogs.SelectFolder();if(String.IsNullOrWhiteSpace(folder))return;SetSaveFolder(game,folder);if(link.HasSaves){folderText.Text=link.Folder;choose.Content="View save folder";QueueSync();}});
             if(CachedSaveConflict(game,map))savedConflicts.Add(map.Key);
             var resolve=Button(saves,"Choose saves…",()=>RequestSync(true));
             Action updateChoice=()=>{resolve.Visibility=savedConflicts.Contains(map.Key)?Visibility.Visible:Visibility.Collapsed;resolve.IsEnabled=syncing==0;};
@@ -221,12 +224,17 @@ namespace PlaytimeRclone
         {
             if(applicationLock!=null)applicationLock.Enforce();
             if (repository == null) return;
+            CheckInstalledSaves();
+            CompleteMigrationRestart();
+            if(File.Exists(Path.Combine(MigrationDirectory,"retirement-result.json"))&&(bool?)JsonSafety.Object(File.ReadAllText(Path.Combine(MigrationDirectory,"retirement-result.json")))["Removed"]==true)ProtectRetiredSaveManager();
+            var retirement=Path.Combine(MigrationDirectory,"retirement-result.json");
+            if(File.Exists(retirement)){var outcome=JsonSafety.Object(File.ReadAllText(retirement));if((bool?)outcome["Removed"]==false)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Retirement","Save Manager removal did not finish: "+(string)outcome["Error"],NotificationType.Error,()=>Guard(ShowSaveMigration)));}
             if(setup!=null&&setup.RecoveryRequired)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.SetupRecovery","An interrupted add-on installation needs recovery. Open Playnite Link → Add-ons → Recover interrupted installation and restart.",NotificationType.Error));
             if (repository.Snapshot().Active.Count > 0)
                 PlayniteApi.Notifications.Add(new NotificationMessage("PlaytimeRclone.Pending", "Unfinished playtime sessions need review. Use the game's Playnite Link recovery menu.", NotificationType.Error));
             timer = new Timer(_ => CheckIdleSync(), null, Timeout.Infinite, Timeout.Infinite);
             if(!onboarding.SetupComplete)PlayniteApi.MainView.UIDispatcher.BeginInvoke(new Action(()=>Guard(()=>ShowWalkthrough(false))));
-            else {status=onboarding.SyncPaused?"Sync paused. Choose Resume sync when you are ready.":status;QueueSync();}
+            else {status=onboarding.SyncPaused?"Sync paused. Choose Resume sync when you are ready.":status;if(ManagerOptions.SyncOnStartup)QueueSync();else ScheduleIdle(true);}
         }
         public override void OnGameStarted(OnGameStartedEventArgs args)
         {
@@ -239,6 +247,7 @@ namespace PlaytimeRclone
                 if (!snapshot.Mappings.TryGetValue(args.Game.Id.ToString(), out map)) return;
                 CheckIdentity(args.Game, map);
                 if (repository.Start(args.Game.Id.ToString(), args.Game.Playtime)) live.Add(args.Game.Id.ToString());
+                QueueSync();
             }
             catch (Exception ex) { NotifyError(ex); }
         }
@@ -254,9 +263,10 @@ namespace PlaytimeRclone
             if(repository.Snapshot().Active.ContainsKey(args.Game.Id.ToString()))
             {args.CancelStartup=true;NotifyError(new InvalidOperationException("Recover the unfinished session before launching again."));return;}
             if(restoringSaves.Contains(args.Game.Id)){args.CancelStartup=true;LaunchAfterRestore(args.Game);return;}
-            try{SaveLink saveLink;if(vault.State.Links.TryGetValue(mapping.Key,out saveLink)&&!String.IsNullOrWhiteSpace(saveLink.Folder))BlobStore.RecoverRestore(saveLink.Folder);}
+            try{SaveLink saveLink;if(vault.State.Links.TryGetValue(mapping.Key,out saveLink)&&saveLink.HasSaves)Plan(args.Game,mapping.Key).Recover();}
             catch(Exception ex){args.CancelStartup=true;NotifyError(ex);return;}
-            if(!permittedLaunches.Remove(args.Game.Id)&&CachedSaveConflict(args.Game,mapping)){args.CancelStartup=true;LaunchAfterSync(args.Game);return;}
+            SaveLink launchLink;vault.State.Links.TryGetValue(mapping.Key,out launchLink);
+            if(!permittedLaunches.Remove(args.Game.Id)&&(CachedSaveConflict(args.Game,mapping)||(launchLink!=null&&launchLink.HasSaves&&launchLink.CheckBeforeLaunch))){args.CancelStartup=true;LaunchAfterSync(args.Game);return;}
             launchReservations.Add(args.Game.Id);ReleaseLaunchReservation(args.Game.Id);
             // Launch local saves immediately. Cloud discovery and uploads run in
             // the background; they cannot replace files during this reservation.
@@ -275,7 +285,7 @@ namespace PlaytimeRclone
                     // Playnite/add-ons may still hold their stop-event locks here.
                     // Projection runs on the UI dispatcher after native processing,
                     // never from inside the native game-stop callback.
-                    QueueSync();
+                    BackupThenSync(args.Game);
                     RetryActivityAfterStop();
                 }
             }
@@ -311,6 +321,7 @@ namespace PlaytimeRclone
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Sync personal vault now", Action = _ => Guard(() => RequestSync(true)) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Add-ons", Action = _ => Guard(ManageSetup) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Connected devices", Action = _ => Guard(ManageDevices) },
+                new MainMenuItem { MenuSection = "@Playnite Link", Description = "Save Manager migration & portability", Action = _ => Guard(ShowSaveMigration) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Passcode", Action = _ => Guard(ManageSecurity) },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Lock Playnite now", Action = _ => {if(security!=null&&!security.Enabled)ManageSecurity();else LockApplication();} },
                 new MainMenuItem { MenuSection = "@Playnite Link", Description = "Show sync status", Action = _ => PlayniteApi.Dialogs.ShowMessage(status, "Playnite Link") }
@@ -318,12 +329,17 @@ namespace PlaytimeRclone
         }
         public override IEnumerable<GameMenuItem> GetGameMenuItems(GetGameMenuItemsArgs args)
         {
-            if (repository == null || args.Games == null || args.Games.Count != 1) return new GameMenuItem[0];
+            if (repository == null || args.Games == null || args.Games.Count == 0) return new GameMenuItem[0];
+            if(args.Games.Count>1)return new[]{new GameMenuItem{MenuSection="Playnite Link",Description="Quick backup selected games",Action=_=>Guard(()=>QuickBackup(args.Games.ToArray()))}};
             var game = args.Games[0];
             var linked=repository.Snapshot().Mappings.ContainsKey(game.Id.ToString());
-            return new[] {
-                new GameMenuItem { MenuSection = "Playnite Link", Description = linked?"Cloud sync…":"Link game…", Action = _ => Guard(() => Manage(game)) }
-            };
+            var items=new List<GameMenuItem>{new GameMenuItem { MenuSection = "Playnite Link", Description = linked?"Cloud sync…":"Link game…", Action = _ => Guard(() => Manage(game)) }};
+            if(linked){var key=repository.Snapshot().Mappings[game.Id.ToString()].Key;
+                items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Save manager…",Action=_=>Guard(()=>ShowSaveManager(game,key))});
+                items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Quick backup",Action=_=>Guard(()=>QuickBackup(new[]{game}))});
+                items.Add(new GameMenuItem{MenuSection="Playnite Link",Description="Sessions & device sync status…",Action=_=>Guard(()=>ShowGameSyncHistory(game))});
+                if(syncing==0)foreach(var backup in Backups.GetBackups(game.Id).OrderByDescending(b=>b.CreatedAt).Take(9)){var captured=backup;items.Add(new GameMenuItem{MenuSection="Playnite Link|Restore backup",Description=backup.CreatedAt.ToString("g")+" · "+backup.Description,Action=_=>QuickRestore(game,key,captured)});}}
+            return items;
         }
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)
         {

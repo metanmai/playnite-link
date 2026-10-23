@@ -1,0 +1,78 @@
+{
+  "version": "0.6.1",
+  "date": "2026-10-23",
+  "passed": 301.0,
+  "failed": 0,
+  "suites": [
+    {
+      "suite": "ActivityTests",
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "suite": "ApplicationLockTests",
+      "passed": 15,
+      "failed": 0
+    },
+    {
+      "suite": "AuditTests",
+      "passed": 8,
+      "failed": 0
+    },
+    {
+      "suite": "CrashRecoveryTests",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "suite": "HltbTests",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "suite": "MetadataTransferTests",
+      "passed": 8,
+      "failed": 0
+    },
+    {
+      "suite": "RuntimeTests",
+      "passed": 4,
+      "failed": 0
+    },
+    {
+      "suite": "SaveManagerReplacementTests",
+      "passed": 44,
+      "failed": 0
+    },
+    {
+      "suite": "SecurityTests",
+      "passed": 9,
+      "failed": 0
+    },
+    {
+      "suite": "SetupTests",
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "suite": "StreamingTests",
+      "passed": 17,
+      "failed": 0
+    },
+    {
+      "suite": "Tests",
+      "passed": 61,
+      "failed": 0
+    },
+    {
+      "suite": "VaultTests",
+      "passed": 64,
+      "failed": 0
+    }
+  ],
+  "setupTerminationCases": 4,
+  "retirementCases": 9,
+  "desktopReplacementAssertions": 47,
+  "fullscreenReplacementAssertions": 47,
+  "dllSha256": "A1507B48666B07478EB391515B2C10EF3C518B1E0AFB718960415E92AA87A904"
+}

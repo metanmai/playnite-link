@@ -1,0 +1,16 @@
+PASS interface uses active Playnite theme resources
+PASS fullscreen palette falls back to fullscreen theme resources instead of white
+PASS startup covers library and existing settings before unlocking
+PASS gate still receives password text through the WPF input pipeline
+PASS closing lock screen requests exit and never reveals library
+PASS wrong passcode keeps all app surfaces blocked
+PASS new plugin windows are covered while locked
+PASS a theme opacity animation cannot reveal a covered window
+PASS a startup dialog re-enabling its owner is remembered behind the lock
+PASS verified passcode restores window states exactly
+PASS expiry automatically relocks without a menu action
+PASS passcode unlocks again after expiry
+PASS manual lock immediately covers the app again
+PASS disposal restores surfaces and removes the gate
+PASS unlock-screen construction failure hides app and requests shutdown
+RESULT 15 passed, 0 failed

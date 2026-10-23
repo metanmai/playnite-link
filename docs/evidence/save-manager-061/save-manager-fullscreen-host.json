@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "checks": 47,
+  "backupCore": "SaveManager.Core.dll",
+  "multiSourceRestore": true,
+  "exclusions": true,
+  "namedDeviceSessions": true,
+  "receiptAfterSync": true,
+  "migrationReplay": true,
+  "globalBundle": true
+}

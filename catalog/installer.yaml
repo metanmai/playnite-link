@@ -1,11 +1,12 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
-  - Version: 0.5.11
+  - Version: 0.6.1
     RequiredApiVersion: 6.18.0
-    ReleaseDate: 2026-10-22
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.5.11/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_5_11.pext
+    ReleaseDate: 2026-10-23
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.6.1/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext
     Changelog:
-      - Recover interrupted save replacement and add-on installation using durable journals.
-      - Verify cached save blobs, constrain JSON depth and preserve local path-sharing consent.
-      - Protect history restores during game launch and play.
-      - Validate fresh Google enrollment, 41 live WAN scenarios and 247 regression checks.
+      - Integrate Save Manager backup core, migration, multi-source saves and named backups.
+      - Add per-game sessions and confirmed device save status.
+      - Fix receipt upload timeout in large libraries.
+      - Pass 301 regression cases and Desktop/Fullscreen host validation.
+      - Include AGPL-3.0 corresponding source and document real-game validation limits.

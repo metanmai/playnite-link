@@ -1,0 +1,38 @@
+[
+  {
+    "Scenario": "verified",
+    "Passed": true
+  },
+  {
+    "Scenario": "changed-config",
+    "Passed": true
+  },
+  {
+    "Scenario": "changed-dll",
+    "Passed": true
+  },
+  {
+    "Scenario": "changed-copy",
+    "Passed": true
+  },
+  {
+    "Scenario": "changed-source",
+    "Passed": true
+  },
+  {
+    "Scenario": "outside-destination",
+    "Passed": true
+  },
+  {
+    "Scenario": "outside-source",
+    "Passed": true
+  },
+  {
+    "Scenario": "existing-destination",
+    "Passed": true
+  },
+  {
+    "Scenario": "wait-for-exit",
+    "Passed": true
+  }
+]

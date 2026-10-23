@@ -120,7 +120,7 @@ namespace PlaytimeRclone
         public static void Write(string path, string content)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            var temp = Path.Combine(Path.GetDirectoryName(path), "." + Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
                 using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))

@@ -1,0 +1,62 @@
+PASS new setups require explicit automatic game selection
+PASS progress measures whole sync and individual stage
+PASS stopping remains active and pause freezes elapsed
+PASS failure and completion clear busy and preserve outcome
+PASS selecting a cloud game uses its existing identity without adding observed total twice
+PASS cloud picker groups one game linked on two devices without matching names
+PASS additive baseline plus sessions
+PASS overlapping history uses maximum, never sum
+PASS duplicate delivery is idempotent
+PASS same logical ID differing contents fails closed
+PASS merge commutes and associates for 100 randomized orderings
+PASS separate identities never mix
+PASS clock skew never chooses a winning total
+PASS schema version rejected
+PASS negative unsigned seconds rejected
+PASS invalid ID rejected
+PASS invalid timestamp rejected
+PASS backwards timestamp rejected
+PASS absurd duration rejected
+PASS manual identity normalized
+PASS manual path injection rejected
+PASS provider ID namespace prevents collisions
+PASS provider opaque IDs preserved
+PASS manual games cannot implicitly match by name
+PASS duplicate local identity blocked
+PASS only explicitly enrolled manual games are captured
+PASS removing local link preserves shared history
+PASS cannot remove link with unfinished session
+PASS remapping an enrolled game blocked
+PASS start-stop exact elapsed and duplicate stop ignored
+PASS unenrolled games ignored
+PASS unfinished session prevents accidental new session
+PASS simultaneous games keep distinct tokens
+PASS restart retains offline sessions and device identity
+PASS pending crash session retained without guessed duration
+PASS one writer per local profile
+PASS corrupted local state fails without reset
+PASS atomic write retains previous backup
+PASS failed disk commit does not mutate in-memory session state
+PASS projection uses exact session seconds without double counting
+PASS projection skips an active game
+PASS outside playtime edit is surfaced
+PASS projection crash after DB write recovers idempotently
+PASS projection failure before DB write retries safely
+PASS session after interrupted projection uses intended checkpoint
+PASS reviewed migration does not sum device histories
+PASS two devices offline sessions converge after repeated sync
+PASS partial upload retries without duplication
+PASS partial failed pull does not merge
+PASS hash mismatch rejects remote modification
+PASS truncated JSON rejected
+PASS unknown remote fields rejected
+PASS conflicting remote session never silently wins
+PASS warm persistent-cache sync makes no upload call; new sessions still publish
+PASS shell metacharacters are quoted as argv
+PASS unconfigured cloud settings can be saved without enabling sync
+PASS configured cloud settings validate before saving
+PASS trailing slashes escaped for Windows argv
+PASS real Rclone local backend end-to-end two device convergence
+PASS real Rclone simultaneous offline publication loses no sessions
+PASS batched metadata pulls only the four permitted object areas
+RESULT 61 passed, 0 failed

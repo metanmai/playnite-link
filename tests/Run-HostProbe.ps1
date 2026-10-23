@@ -5,6 +5,8 @@ param(
     [switch]$SkipBuild,
     [switch]$LockProbe,
     [switch]$OnboardingProbe,
+    [switch]$DevicesProbe,
+    [switch]$SaveManagerProbe,
     [string]$BuildDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -22,6 +24,8 @@ New-Item -ItemType Directory -Force $appPath,$profilePath,$subjectPath,$probePat
 & robocopy $PlaynitePath $appPath /E /XD Extensions 'User Data' /XF '*.pdb' '*.log' 'unins*' /NFL /NDL /NJH /NJS /NP
 if ($LASTEXITCODE -ge 8) { throw 'Failed to copy installed Playnite to isolated test lab' }
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll'),(Join-Path $buildDir 'extension.yaml') $subjectPath
+Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll'),(Join-Path $projectRoot 'src/RetireSaveManager.ps1') $subjectPath
+Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $subjectPath
 if(Test-Path (Join-Path $buildDir 'SetupApply.ps1')){Copy-Item (Join-Path $buildDir 'SetupApply.ps1') $subjectPath}
 $commonPath = Join-Path $appPath 'Common.config'
 $pipeName = 'net.pipe://localhost/PlaytimeProbe' + [Guid]::NewGuid().ToString('N')
@@ -38,9 +42,11 @@ Type: GenericPlugin
 '@ | Set-Content (Join-Path $probePath 'extension.yaml')
 $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
-$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
+$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll","/r:$buildDir/SaveManager.Core.dll",'/r:System.IO.Compression.dll','/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll') $probePath
-$probeSource=if($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}else{'PersonalHostProbe.cs'}
+Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll') $probePath
+Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $probePath
+$probeSource=if($SaveManagerProbe){'SaveManagerHostProbe.cs'}elseif($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}elseif($DevicesProbe){'DevicesHostProbe.cs'}else{'PersonalHostProbe.cs'}
 & $compilerPath /nologo /target:library "/out:$probePath/HostProbe.dll" @references (Join-Path $PSScriptRoot $probeSource)
 if ($LASTEXITCODE -ne 0) { throw 'Host probe compile failed' }
 & $compilerPath /nologo /target:winexe "/out:$profilePath/FixtureGame.exe" (Join-Path $PSScriptRoot 'FixtureGame.cs')
@@ -96,7 +102,7 @@ if($OnboardingProbe -and (Get-Content $resultPath -Raw|ConvertFrom-Json).passed)
 }
 $evidencePath = Join-Path $projectRoot 'docs/evidence'
 New-Item -ItemType Directory -Force $evidencePath | Out-Null
-$prefix=if($OnboardingProbe){'onboarding-'+$Mode.ToLowerInvariant()}elseif($LockProbe){'lock-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}
+$prefix=if($SaveManagerProbe){'save-manager-'+$Mode.ToLowerInvariant()}elseif($OnboardingProbe){'onboarding-'+$Mode.ToLowerInvariant()}elseif($LockProbe){'lock-'+$Mode.ToLowerInvariant()}elseif($DevicesProbe){'devices-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}
 Copy-Item $resultPath (Join-Path $evidencePath ($prefix + '-host.json')) -Force
 Get-ChildItem $profilePath -Filter '*.png' | ForEach-Object { Copy-Item $_.FullName (Join-Path $evidencePath ($prefix + '-' + $_.Name)) -Force }
 Copy-Item (Join-Path $profilePath 'extensions.log') (Join-Path $evidencePath ($prefix + '-extensions.log')) -Force

@@ -1,0 +1,9 @@
+PASS progressing history download is not killed at 105 seconds
+PASS stalled connection times out without discarding progress
+PASS initial listing has bounded grace and absolute work cap
+PASS invalid cached records are preserved in quarantine for redownload
+PASS valid immutable cache survives verification unchanged
+PASS real Rclone repairs a damaged cache and leaves cloud unchanged
+PASS cache seeding copies verified objects and preserves source and local mappings
+PASS simulated quota and rejected credentials preserve queued objects for immutable retry
+RESULT 8 passed, 0 failed

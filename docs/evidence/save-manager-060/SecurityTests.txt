@@ -1,0 +1,10 @@
+PASS local protection defaults off without inventing a user passcode
+PASS passcode requires minimum length
+PASS passcode verifier persists under Windows DPAPI without plaintext
+PASS lock now timeout and restart all require authentication
+PASS failed-attempt lockout persists and expires without sleeping
+PASS locked controls cannot replace or remove protection
+PASS a session lock during passcode verification cannot be undone by its late result
+PASS damaged protected settings do not silently reset security
+PASS unlocked user can remove local protection
+RESULT 9 passed, 0 failed

@@ -14,7 +14,7 @@ New-Item -ItemType Directory -Path $runRoot | Out-Null
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $buildDir = Join-Path $runRoot 'build'
 & (Join-Path $repoRoot 'build.ps1') -PlaynitePath $PlaynitePath -BuildDirectory $buildDir
-$suites = @('AuditTests','CrashRecoveryTests','Tests','VaultTests','StreamingTests','SecurityTests','ApplicationLockTests','SetupTests','ActivityTests','HltbTests','MetadataTransferTests')
+$suites = @('AuditTests','CrashRecoveryTests','SaveManagerReplacementTests','Tests','VaultTests','StreamingTests','SecurityTests','ApplicationLockTests','SetupTests','ActivityTests','HltbTests','MetadataTransferTests')
 if ($IncludeRuntimeDownload) { $suites += 'RuntimeTests' }
 $results = @()
 foreach ($suite in $suites) {
@@ -25,4 +25,5 @@ foreach ($suite in $suites) {
     if ($code -ne 0) { throw "$suite failed; inspect $runRoot" }
 }
 & (Join-Path $PSScriptRoot 'Run-SetupCrashTests.ps1') -OutputDirectory (Join-Path $runRoot 'SetupCrashTests')
+& (Join-Path $PSScriptRoot 'Run-SaveRetirementTests.ps1') -OutputDirectory (Join-Path $runRoot 'SaveRetirementTests')
 Write-Output "All requested regression suites and helper termination tests passed. Evidence: $runRoot"

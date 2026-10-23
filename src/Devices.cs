@@ -47,7 +47,7 @@ namespace PlaytimeRclone
         public List<string> Parents=new List<string>();
         public DevicePreferences Settings;
         public string State;
-        public string AppVersion="0.5.1";
+        public string AppVersion="0.6.1";
         public List<DeviceGame> Games;
         public string Canonical(){return JsonConvert.SerializeObject(this,Formatting.None);}
         public string Hash(){return Identity.Hash(Canonical());}
@@ -126,13 +126,14 @@ namespace PlaytimeRclone
                 DateTimeOffset.UtcNow-DateTimeOffset.Parse(heads[0].CreatedUtc)<TimeSpan.FromMinutes(15))return;
             Add(new DeviceEvent{Author=device,Target=device,Kind="profile",Settings=settings.Clone(),Games=games,Parents=heads.Select(e=>e.Hash()).ToList()});
         }
-        public List<DeviceView> Views()
+        public List<DeviceView> Views(bool includeRemoved=false)
         {
             var all=Read(Objects);ValidateGraph(all);var result=new List<DeviceView>();
             foreach(var target in all.Values.Select(e=>e.Target).Distinct())
             {
                 var profiles=HeadsFrom(all,target,"profile");var profile=profiles.OrderByDescending(e=>DateTimeOffset.Parse(e.CreatedUtc)).FirstOrDefault();var settings=HeadsFrom(all,target,"settings");
                 var statuses=HeadsFrom(all,target,"status");var state=statuses.Any(h=>h.State=="removed")?"removed":statuses.Any(h=>h.State=="paused")?"paused":"active";
+                if(state=="removed"&&!includeRemoved)continue;
                 var effective=settings.Count==1?settings[0].Settings:profile==null?new DevicePreferences{Name="Unknown device"}:profile.Settings;
                 result.Add(new DeviceView{Id=target,Name=effective.Name,LastSeen=profile==null?null:profile.CreatedUtc,State=state,SettingsConflict=settings.Count>1,
                     Settings=effective.Clone(),Games=profile==null?new List<DeviceGame>():profile.Games});

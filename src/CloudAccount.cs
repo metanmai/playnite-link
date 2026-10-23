@@ -31,11 +31,15 @@ namespace PlaytimeRclone
         public static void ConfigureProtocol(Func<List<string>,string> run,string config,string remote,string provider,Func<CloudQuestion,string> ask,Action<string,Action> progress,Dictionary<string,string> initial=null,Func<bool> cancelled=null)
         {
             var args=new List<string>{"config","create",remote,provider,"config_is_local","true","--config",config,"--non-interactive"};
-            if(initial!=null)foreach(var pair in initial){if(pair.Key!="client_id"&&pair.Key!="client_secret")throw new ArgumentException("Unsupported provider credential field.");args.Add(pair.Key);args.Add(pair.Value);}
+            var allowed=new HashSet<string>(new[]{"client_id","client_secret"});
+            if(provider=="webdav")allowed.UnionWith(new[]{"url","vendor","user","pass"});
+            if(provider=="s3")allowed.UnionWith(new[]{"provider","access_key_id","secret_access_key","endpoint","env_auth","acl","no_check_bucket"});
+            if(initial!=null)foreach(var pair in initial){if(!allowed.Contains(pair.Key))throw new ArgumentException("Unsupported provider credential field.");args.Add(pair.Key);args.Add(pair.Value);}
+            if(initial!=null&&initial.ContainsKey("pass"))args.Add("--obscure");
             for(int step=0;step<30;step++)
             {
                 if(cancelled!=null&&cancelled())throw new OperationCanceledException("Connection cancelled. Your previous connection is unchanged.");
-                string response=null;progress("Connecting your cloud account in the browser…",()=>response=run(args));
+                string response=null;progress("Connecting your cloud storage…",()=>response=run(args));
                 var state=Parse(response);var continuation=(string)state["State"];
                 if(String.IsNullOrEmpty(continuation))return;
                 var option=state["Option"] as JObject;if(option==null)throw new IOException("Rclone returned a continuation without a question.");

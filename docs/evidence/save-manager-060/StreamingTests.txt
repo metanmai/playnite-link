@@ -1,0 +1,18 @@
+PASS stream and restore a 64 MiB save without a save-size cap
+PASS unchanged files deduplicate across paths and revisions
+PASS capture more than the old 4096 file limit
+PASS blob manifests reject path traversal and negative sizes
+PASS missing blobs cannot modify existing saves
+PASS same-length corruption fails SHA-256 before swapping folders
+PASS legacy inline snapshots migrate with common-version ancestry intact
+PASS migrating before a remote legacy descendant arrives does not invent a conflict
+PASS cancelled streaming capture cleans staging without publishing partial blobs
+PASS two equivalent migration branches converge without a false conflict
+PASS device profiles round trip without cloud credentials
+PASS remote per-device preferences propagate and resolve concurrent edits
+PASS device pause remove and explicit re-enable converge
+PASS concurrent remove wins over an unseen resume
+PASS removed device stays out of the roster after stale check-in while its cloud game remains available
+PASS invalid remote settings and cross-device parents are rejected
+PASS launch during background staging prevents save replacement
+RESULT 17 passed, 0 failed

@@ -15,7 +15,7 @@ namespace PlaytimeRclone
   public string Key {get;set;}public string Name {get;set;}public string Devices {get;set;}
   public string Label {get{return String.IsNullOrWhiteSpace(Devices)?Name:Name+" · "+Devices;}}
   public static CloudGameChoice[] FromDevices(IEnumerable<DeviceView> devices)
-  {return devices.SelectMany(d=>d.Games.Select(g=>new{Device=d.Name,Game=g})).GroupBy(p=>p.Game.Key).Select(g=>new CloudGameChoice{Key=g.Key,Name=g.First().Game.Name,Devices=String.Join(", ",g.Select(p=>p.Device).Distinct().OrderBy(n=>n))}).OrderBy(g=>g.Name,StringComparer.CurrentCultureIgnoreCase).ToArray();}
+  {return devices.SelectMany(d=>d.Games.Select(g=>new{Device=d.State=="removed"?"Synced vault history":d.Name,Game=g})).GroupBy(p=>p.Game.Key).Select(g=>new CloudGameChoice{Key=g.Key,Name=g.First().Game.Name,Devices=String.Join(", ",g.Select(p=>p.Device).Distinct().OrderBy(n=>n))}).OrderBy(g=>g.Name,StringComparer.CurrentCultureIgnoreCase).ToArray();}
  }
  public sealed partial class PlaytimePlugin
  {
@@ -36,7 +36,7 @@ namespace PlaytimeRclone
    if(String.IsNullOrWhiteSpace(config.RemoteFolder))throw new InvalidOperationException("Connect your storage before adding games to the cloud.");
    if(!await syncGate.WaitAsync(0))throw new InvalidOperationException("A sync is running. Wait for it to finish, then refresh.");
    Interlocked.Exchange(ref syncing,1);
-   try{return await Task.Run(()=>{CheckTransferForDiscovery();var captured=config;CheckActiveGameVault(captured);var cache=Path.Combine(Root,"cloud-game-discovery");Directory.CreateDirectory(cache);ReportStatus("Reading games linked in this vault.",SyncDisplayState.Working,"Checking cloud games");new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/devices/objects",limitSeconds:20,cancelled:()=>closing||cancelled()).Pull(cache);devices.Import(cache);var discovered=new DeviceDirectory(Path.Combine(cache,"verified-cloud"));discovered.Import(cache);deviceViewCache=devices.Views().ToArray();ReportStatus("Cloud game list checked.",SyncDisplayState.Completed,"Cloud games ready");return CloudGameChoice.FromDevices(discovered.Views());});}
+   try{return await Task.Run(()=>{CheckTransferForDiscovery();var captured=config;CheckActiveGameVault(captured);var cache=Path.Combine(Root,"cloud-game-discovery");Directory.CreateDirectory(cache);ReportStatus("Reading games linked in this vault.",SyncDisplayState.Working,"Checking cloud games");new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/devices/objects",limitSeconds:20,cancelled:()=>closing||cancelled()).Pull(cache);devices.Import(cache);var discovered=new DeviceDirectory(Path.Combine(cache,"verified-cloud"));discovered.Import(cache);deviceViewCache=devices.Views().ToArray();ReportStatus("Cloud game list checked.",SyncDisplayState.Completed,"Cloud games ready");return CloudGameChoice.FromDevices(discovered.Views(true));});}
    finally{Interlocked.Exchange(ref syncing,0);syncGate.Release();}
   }
   private void CheckTransferForDiscovery(){if(closing)throw new OperationCanceledException();}

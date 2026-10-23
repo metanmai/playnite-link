@@ -26,12 +26,12 @@ namespace PlaytimeRclone
         public void Validate()
         {
             Guid id, device; DateTimeOffset date;
-            if ((Version != 1 && Version != 2) || !Guid.TryParseExact(Id, "N", out id) || !Guid.TryParseExact(Device, "N", out device) ||
+            if ((Version != 1 && Version != 2 && Version != 3) || (Version==3&&Kind!="save") || !Guid.TryParseExact(Id, "N", out id) || !Guid.TryParseExact(Device, "N", out device) ||
                 !Regex.IsMatch(Game ?? "", "^[a-f0-9]{64}$") || (Kind != "save" && Kind != "preferences" && Kind != "setup") ||
                 !DateTimeOffset.TryParse(CreatedUtc, out date) || Parents == null || Parents.Count > 256 ||
                 Parents.Distinct().Count() != Parents.Count || Parents.Any(p => !Regex.IsMatch(p ?? "", "^[a-f0-9]{64}$")) || Data == null)
                 throw new InvalidDataException("Invalid vault revision.");
-            if (Kind == "save") SaveFiles.Validate(Data);
+            if (Kind == "save") {SaveFiles.Validate(Data);if(Version==3)SavePlan.ValidateLayout(Data);}
             else if(Kind=="setup")SetupComponent.Validate(Game,Data);
             else if (Data.Count != 3 || !Data.ContainsKey("Favorite") || !Data.ContainsKey("Hidden") || !Data.ContainsKey("Notes") ||
                 (Data["Favorite"] != "True" && Data["Favorite"] != "False") || (Data["Hidden"] != "True" && Data["Hidden"] != "False") ||
@@ -123,7 +123,20 @@ namespace PlaytimeRclone
     }
 
     public sealed class Checkpoint { public string Revision; public string Content; }
-    public sealed class SaveLink { public string Folder; public Checkpoint Save = new Checkpoint(); public Checkpoint Preferences = new Checkpoint(); }
+    public sealed class SaveLink
+    {
+        public string Folder;
+        public List<SaveSource> Sources = new List<SaveSource>();
+        public List<string> RestoreExclusions = new List<string>();
+        public bool AutoBackup = true, NotifyBackup = true, CheckBeforeLaunch = true;
+        public bool ConfirmBeforeBackup = true, RestoreOnInstall = true;
+        public string BackupRoot;
+        public int MaxAutoBackups = 10;
+        public int NextSourceId = 2;
+        public string EmulatorDirectory;
+        public Checkpoint Save = new Checkpoint(); public Checkpoint Preferences = new Checkpoint();
+        public bool HasSaves { get { return !String.IsNullOrWhiteSpace(Folder)||(Sources!=null&&Sources.Count>0); } }
+    }
     public sealed class VaultState
     {
         public int Version = 1;
@@ -138,6 +151,7 @@ namespace PlaytimeRclone
         public string LocalHash;
         public List<Revision> Heads;
         public bool EmptyLocal;
+        public bool MissingSource;
     }
     public sealed class ReconcileResult { public bool Cancelled; public bool Changed; public SortedDictionary<string,string> Data; public string Revision; }
     public sealed class Vault
@@ -238,11 +252,12 @@ namespace PlaytimeRclone
             return revisions.Where(p=>!parents.Contains(p.Key)).OrderBy(p=>p.Key,StringComparer.Ordinal).Select(p=>p.Value).ToList();
         }
         // choice: local, cancel, or a head hash. No implicit timestamp winner.
-        public ReconcileResult Reconcile(string game,string kind,string device,SortedDictionary<string,string> local,Checkpoint checkpoint,Func<Conflict,string> choose,Action<SortedDictionary<string,string>> apply)
+        public ReconcileResult Reconcile(string game,string kind,string device,SortedDictionary<string,string> local,Checkpoint checkpoint,Func<Conflict,string> choose,Action<SortedDictionary<string,string>> apply,Func<SortedDictionary<string,string>,SortedDictionary<string,string>> project=null,Func<SortedDictionary<string,string>,SortedDictionary<string,string>> publishLocal=null,bool requireSourceReview=false)
         {
+            if(project==null)project=d=>d;
             var heads=Heads(game,kind); var hash=Revision.ContentHashOf(local); string choice="local";
-            if(heads.Count>1&&heads.All(h=>h.ContentHash()==hash))choice="local";
-            if(heads.Count==1 && heads[0].ContentHash()==hash)
+            if(heads.Count>1&&heads.All(h=>Revision.ContentHashOf(project(h.Data))==hash))choice="local";
+            if(heads.Count==1 && Revision.ContentHashOf(project(heads[0].Data))==hash)
             { checkpoint.Revision=heads[0].Hash();checkpoint.Content=hash;Save();return new ReconcileResult { Data=local,Revision=checkpoint.Revision }; }
             if(heads.Count==1 && checkpoint.Content==hash && checkpoint.Revision!=null)
             {
@@ -252,17 +267,18 @@ namespace PlaytimeRclone
                 choice=seen.Contains(checkpoint.Revision) ? heads[0].Hash() : null;
             }
             else if(heads.Count==1 && heads[0].Hash()==checkpoint.Revision) choice="local";
-            else if(heads.Count==1 && checkpoint.Revision==null && local.Count==0) choice=heads[0].Hash();
-            else if(heads.Count>0 && !(heads.Count>1&&heads.All(h=>h.ContentHash()==hash))) choice=null;
-            if((choice=="local" && kind=="save" && local.Count==0 && heads.Any(h=>h.Data.Count>0)) || choice==null)
-                choice=choose(new Conflict { Game=game,Kind=kind,LocalHash=hash,Heads=heads,EmptyLocal=local.Count==0 });
+            else if(heads.Count==1 && checkpoint.Revision==null && !SavePlan.HasFiles(local)) choice=heads[0].Hash();
+            else if(heads.Count>0 && !(heads.Count>1&&heads.All(h=>Revision.ContentHashOf(project(h.Data))==hash))) choice=null;
+            if(requireSourceReview||(choice=="local" && kind=="save" && !SavePlan.HasFiles(local) && heads.Any(h=>SavePlan.HasFiles(project(h.Data)))) || choice==null)
+                choice=choose(new Conflict { Game=game,Kind=kind,LocalHash=hash,Heads=heads,EmptyLocal=!SavePlan.HasFiles(local),MissingSource=requireSourceReview });
             if(choice==null || choice=="cancel")return new ReconcileResult { Cancelled=true,Data=local };
-            var selected=choice=="local" ? local : heads.Single(h=>h.Hash()==choice).Data;
+            var selected=choice=="local" ? local : project(heads.Single(h=>h.Hash()==choice).Data);
             string revisionId;
             if(heads.Count==1 && choice==heads[0].Hash()) revisionId=heads[0].Hash();
             else
             {
-                var revision=new Revision { Version=kind=="save"&&(selected.Count==0||selected.Values.Any(v=>v.StartsWith("blob:",StringComparison.Ordinal)))?2:1,Game=game,Kind=kind,Device=device,Parents=heads.Select(h=>h.Hash()).OrderBy(x=>x,StringComparer.Ordinal).ToList(),Data=selected };
+                var publication=choice=="local"?(publishLocal==null?selected:publishLocal(selected)):heads.Single(h=>h.Hash()==choice).Data;
+                var revision=new Revision { Version=kind=="save"&&publication.Keys.Any(k=>k.StartsWith(SavePlan.Mounts,StringComparison.Ordinal))?3:kind=="save"&&(publication.Count==0||publication.Values.Any(v=>v.StartsWith("blob:",StringComparison.Ordinal)))?2:1,Game=game,Kind=kind,Device=device,Parents=heads.Select(h=>h.Hash()).OrderBy(x=>x,StringComparer.Ordinal).ToList(),Data=publication };
                 Add(revision); revisionId=revision.Hash();
             }
             if(Revision.ContentHashOf(selected)!=hash)apply(selected);
