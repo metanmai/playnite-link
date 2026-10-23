@@ -25,9 +25,13 @@ foreach($peer in @('A','B')){
   $hltbSettings=Get-Content (Join-Path $hltbSource 'config.json') -Raw|ConvertFrom-Json;$hltbSettings.AutoSetCurrentPlayTime=$false;$hltbSettings|ConvertTo-Json -Depth 60|Set-Content (Join-Path $hltbTarget 'config.json')
  }
  Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll'),(Join-Path $projectRoot 'src/SetupApply.ps1'),(Join-Path $projectRoot 'extension.yaml') $extension
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/AchievementEngine') $extension -Recurse -Force
+ Copy-Item (Join-Path $projectRoot 'build/SaveManager.Core.dll'),(Join-Path $projectRoot 'build/Microsoft.Toolkit.Uwp.Notifications.dll'),(Join-Path $projectRoot 'src/RetireAchievementAddon.ps1') $extension -Force
  Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probe
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $probe -Force
  "Id: HostProbe_130f2083-f8e6-46bd-a9a9-56ff84451f95`nName: Activity integration acceptance probe`nAuthor: Test`nVersion: 1.0.0`nModule: HostProbe.dll`nType: GenericPlugin"|Set-Content (Join-Path $probe 'extension.yaml')
- $refs=@("/r:$app/Playnite.SDK.dll","/r:$app/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationFramework.dll","/r:$wpf/PresentationCore.dll")
+ $refs=@("/r:$app/Playnite.SDK.dll","/r:$app/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll","/r:$projectRoot/build/StartPage.SDK.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationFramework.dll","/r:$wpf/PresentationCore.dll")
  & $compiler /nologo /target:library "/out:$probe/HostProbe.dll" @refs (Join-Path $PSScriptRoot 'GamePickerPeerProbe.cs');if($LASTEXITCODE -ne 0){throw 'Probe compile failed'}
  & $compiler /nologo /target:winexe "/out:$profile/FixtureGame.exe" (Join-Path $PSScriptRoot 'FixtureGame.cs');if($LASTEXITCODE -ne 0){throw 'Fixture compile failed'}
  @{Version=7;DatabasePath=(Join-Path $profile 'library');FirstTimeWizardComplete=$true;EnableGameControllerSupport=$false;StartOnBoot=$false;StartInFullscreen=($peer -eq 'B');Theme='Playnite_builtin_DefaultDesktop';AfterGameClose=0}|ConvertTo-Json|Set-Content (Join-Path $profile 'config.json')

@@ -1,0 +1,11 @@
+{
+  "catalog": true,
+  "logSha256": "7EEAD5E56C3AA4E4BEEC337B709B662D2D2D25F350CA2D545386C1DF6E1312B9",
+  "passed": true,
+  "transport": "Google Drive with local existing authorization",
+  "syntheticOnly": true,
+  "customizationAncestry": true,
+  "verifiedBlob": true,
+  "records": true,
+  "freshDownload": true
+}

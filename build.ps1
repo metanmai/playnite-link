@@ -3,8 +3,23 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot.Replace('/', '\')
 $buildDir = if ($BuildDirectory) { [IO.Path]::GetFullPath($BuildDirectory) } else { Join-Path $projectRoot 'build' }
 New-Item -ItemType Directory -Force $buildDir | Out-Null
+$engineArchive=Join-Path $projectRoot 'vendor/PlayniteAchievements/PlayniteAchievements-4.1.1.pext'
+if((Get-FileHash -LiteralPath $engineArchive -Algorithm SHA256).Hash -ne '8005864BBC9D5512CF26B8D24DAC9E68F288F4606A9342D823C67D6D21C36692'){throw 'Achievement engine package checksum mismatch'}
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$engineStage=Join-Path $buildDir ('achievement-stage-'+[Guid]::NewGuid().ToString('N'))
+[IO.Compression.ZipFile]::ExtractToDirectory($engineArchive,$engineStage)
+# Playnite scans nested extension manifests. This is an in-process component,
+# so its original manifest must never register a second installed extension.
+Rename-Item -LiteralPath (Join-Path $engineStage 'extension.yaml') -NewName 'engine-manifest.yaml'
+$engineTarget=Join-Path $buildDir 'AchievementEngine'
+New-Item -ItemType Directory -Force $engineTarget | Out-Null
+Copy-Item (Join-Path $engineStage '*') $engineTarget -Recurse -Force
+Copy-Item (Join-Path $projectRoot 'vendor/PlayniteAchievements/LICENSE') (Join-Path $engineTarget 'PlayniteAchievements-LICENSE.txt') -Force
+Copy-Item (Join-Path $projectRoot 'vendor/PlayniteAchievements/StartPage-LICENSE') (Join-Path $engineTarget 'StartPage-LICENSE.txt') -Force
+Copy-Item (Join-Path $engineTarget 'StartPage.SDK.dll') $buildDir -Force
 $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $references = @("/r:$PlaynitePath/Playnite.SDK.dll", "/r:$PlaynitePath/Newtonsoft.Json.dll", '/r:System.Core.dll', '/r:System.dll', '/r:System.Xaml.dll','/r:System.Security.dll','/r:System.IO.Compression.dll')
+$references += "/r:$buildDir/StartPage.SDK.dll"
 $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
 $references += @("/r:$wpfRoot/WindowsBase.dll", "/r:$wpfRoot/PresentationCore.dll", "/r:$wpfRoot/PresentationFramework.dll")
 $toolset = Join-Path $env:LOCALAPPDATA 'PlayniteLink-build-tools/roslyn-4.8.0'
@@ -53,6 +68,7 @@ Write-Output "Built extension and tests in $buildDir"
 
 Copy-Item (Join-Path $projectRoot "src/SetupApply.ps1") $buildDir -Force
 Copy-Item (Join-Path $projectRoot "src/Collect-LinkDiagnostics.ps1") $buildDir -Force
+Copy-Item (Join-Path $projectRoot "src/RetireAchievementAddon.ps1") $buildDir -Force
 & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/NativeHltbTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/NativeHltbTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Native HLTB test compilation failed' }
 & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/AchievementTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/AchievementTests.cs')
@@ -66,7 +82,7 @@ if ($LASTEXITCODE -ne 0) { throw 'HLTB integration test compilation failed' }
 & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/RuntimeTests.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot 'tests/RuntimeTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Runtime test compilation failed' }
 
-foreach($test in @('MetadataTransferTests','MetadataCloudProbe','AuditTests','CrashRecoveryTests','CloudEnrollmentProbe','SaveManagerReplacementTests')){
+foreach($test in @('MetadataTransferTests','MetadataCloudProbe','AchievementCloudProbe','AuditTests','CrashRecoveryTests','CloudEnrollmentProbe','SaveManagerReplacementTests')){
  & $compilerPath /nologo /target:exe /optimize+ /langversion:5 "/out:$buildDir/$test.exe" @references "/r:$buildDir/PlayniteLink.dll" (Join-Path $projectRoot ('tests/'+$test+'.cs'))
  if($LASTEXITCODE -ne 0){throw 'Metadata test compilation failed'}
 }

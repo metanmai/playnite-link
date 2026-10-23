@@ -9,6 +9,10 @@ New-Item -ItemType Directory -Force $stagePath,$releasePath | Out-Null
 Copy-Item (Join-Path $projectRoot 'src/SetupApply.ps1'),(Join-Path $buildDir 'PlayniteLink.dll'),(Join-Path $projectRoot 'extension.yaml'),(Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'LICENSE'),(Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') $stagePath -Force
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll'),(Join-Path $projectRoot 'src/RetireSaveManager.ps1') $stagePath -Force
 Copy-Item (Join-Path $projectRoot 'src/Collect-LinkDiagnostics.ps1') $stagePath -Force
+Copy-Item (Join-Path $projectRoot 'src/RetireAchievementAddon.ps1') $stagePath -Force
+if(Test-Path (Join-Path $buildDir 'AchievementEngine/extension.yaml')){throw 'An achievement component cannot contain an installable extension manifest'}
+Copy-Item (Join-Path $buildDir 'AchievementEngine') $stagePath -Recurse
+Copy-Item (Join-Path $buildDir 'StartPage.SDK.dll') $stagePath -Force
 Copy-Item (Join-Path $projectRoot 'docs/ALLY-DIAGNOSTICS-PROMPT.txt') $stagePath -Force
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $stagePath -Force
 Copy-Item (Join-Path $projectRoot 'vendor/Notifications/LICENSE.md') (Join-Path $stagePath 'Notifications-LICENSE.md')
@@ -24,9 +28,12 @@ Copy-Item (Join-Path $projectRoot 'docs/ALLY-DIAGNOSTICS-PROMPT.txt') $sourceDoc
 foreach($name in @('acceptance-tally.json','saves-0511-local-tally.json','saves-0511-local-extra-tally.json','saves-0511-local-transfer-tally.json','saves-0511-cloud-tally.json','saves-0511-cloud-transfer-tally.json')){Copy-Item (Join-Path $projectRoot ('docs/evidence/'+$name)) $sourceEvidence}
 Copy-Item (Join-Path $projectRoot 'docs/evidence/save-manager-060') $sourceEvidence -Recurse
 if(Test-Path (Join-Path $projectRoot 'docs/evidence/save-manager-061')){Copy-Item (Join-Path $projectRoot 'docs/evidence/save-manager-061') $sourceEvidence -Recurse}
+Copy-Item (Join-Path $projectRoot 'docs/evidence/achievements-070') $sourceEvidence -Recurse
 Compress-Archive -Path (Join-Path $sourceStage '*') -DestinationPath (Join-Path $stagePath 'CorrespondingSource.zip')
 $reportPath=Join-Path $stagePath 'docs'
 New-Item -ItemType Directory -Force $reportPath | Out-Null
+Copy-Item (Join-Path $projectRoot 'docs/ACCEPTANCE-0.7.0.md'),(Join-Path $projectRoot 'docs/RELEASE-0.7.0.md') $reportPath
+Copy-Item (Join-Path $projectRoot 'docs/evidence/achievements-070') $reportPath -Recurse
 Copy-Item (Join-Path $projectRoot 'docs/ACCEPTANCE-0.6.0.md') $reportPath
 if(Test-Path (Join-Path $projectRoot 'docs/ACCEPTANCE-0.6.1.md')){Copy-Item (Join-Path $projectRoot 'docs/ACCEPTANCE-0.6.1.md') $reportPath}
 Copy-Item (Join-Path $projectRoot 'docs/evidence/save-manager-060') $reportPath -Recurse

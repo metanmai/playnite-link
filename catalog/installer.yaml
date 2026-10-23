@@ -1,12 +1,12 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
-  - Version: 0.6.3
+  - Version: 0.7.0
     RequiredApiVersion: 6.18.0
     ReleaseDate: 2026-10-23
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.6.3/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_1.pext
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.7.0/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_7_0.pext
     Changelog:
-      - Synchronize achievement records with saves and sessions.
-      - Capture Playnite Achievements and SuccessStory caches automatically.
-      - Preserve unlocks, earliest dates and compatible partial progress across devices.
-      - View synced achievements without a source add-on on the receiving device.
-      - Keep achievement failures queued without blocking save and session sync.
+      - Add Playnite Link sidebar dashboard with live sync status and library controls.
+      - Build the original Playnite Achievements 4.1.1 engine into Link.
+      - Sync achievement catalogs, unlocks, progress, notes, goals and manual customizations.
+      - Validate Desktop, Fullscreen, independent profiles and real Google Drive transfer.
+      - Include source, licenses and explicit hardware/provider validation limits.

@@ -22,9 +22,10 @@ else{@{Name=$entry.GameName;Submission=[string]$entry.UserGameId}|ConvertTo-Json
 New-Item -ItemType File (Join-Path $profile 'PROBE-ONLY')|Out-Null
 @{Version=7;DatabasePath=(Join-Path $profile 'library');FirstTimeWizardComplete=$true;EnableGameControllerSupport=$false;StartOnBoot=$false}|ConvertTo-Json|Set-Content (Join-Path $profile 'config.json')
 Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probe
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $probe -Force
 "Id: HostProbe_130f2083-f8e6-46bd-a9a9-56ff84451f95`nName: Live HLTB acceptance probe`nAuthor: Test`nVersion: 1.0.0`nModule: HostProbe.dll`nType: GenericPlugin"|Set-Content (Join-Path $probe 'extension.yaml')
 $compiler="$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe";$wpf="$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
-& $compiler /nologo /target:library "/out:$probe/HostProbe.dll" "/r:$app/Playnite.SDK.dll" "/r:$app/Newtonsoft.Json.dll" "/r:$projectRoot/build/PlayniteLink.dll" /r:System.Core.dll /r:System.Xaml.dll "/r:$wpf/WindowsBase.dll" "/r:$wpf/PresentationFramework.dll" (Join-Path $PSScriptRoot 'HltbLiveProbe.cs')
+& $compiler /nologo /target:library "/out:$probe/HostProbe.dll" "/r:$app/Playnite.SDK.dll" "/r:$app/Newtonsoft.Json.dll" "/r:$projectRoot/build/PlayniteLink.dll" "/r:$projectRoot/build/StartPage.SDK.dll" /r:System.Core.dll /r:System.Xaml.dll "/r:$wpf/WindowsBase.dll" "/r:$wpf/PresentationFramework.dll" (Join-Path $PSScriptRoot 'HltbLiveProbe.cs')
 if($LASTEXITCODE -ne 0){throw 'Probe compile failed'}
 $process=Start-Process (Join-Path $app 'Playnite.DesktopApp.exe') -ArgumentList @('--masterinstance','--nolibupdate','--hidesplashscreen','--userdatadir',('"'+$profile+'"')) -WindowStyle Hidden -PassThru
 $result=Join-Path $profile 'hltb-live-result.json';$until=[DateTime]::UtcNow.AddMinutes(5)

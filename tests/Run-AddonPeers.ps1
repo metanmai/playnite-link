@@ -20,8 +20,9 @@ foreach($peer in @('A','B')){
  $common=Join-Path $app 'Common.config';(Get-Content -LiteralPath $common -Raw).Replace('net.pipe://localhost/PlaynitePipe',('net.pipe://localhost/AddonProbe'+[Guid]::NewGuid().ToString('N'))) | Set-Content -LiteralPath $common
  Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll'),(Join-Path $projectRoot 'src/SetupApply.ps1'),(Join-Path $projectRoot 'extension.yaml') $subject
  Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probe
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $probe -Force
  "Id: HostProbe_130f2083-f8e6-46bd-a9a9-56ff84451f95`nName: Isolated add-on peer probe`nAuthor: Test`nVersion: 1.0.0`nModule: HostProbe.dll`nType: GenericPlugin" | Set-Content (Join-Path $probe 'extension.yaml')
- $refs=@("/r:$app/Playnite.SDK.dll","/r:$app/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationFramework.dll","/r:$wpf/PresentationCore.dll")
+ $refs=@("/r:$app/Playnite.SDK.dll","/r:$app/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll","/r:$projectRoot/build/StartPage.SDK.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationFramework.dll","/r:$wpf/PresentationCore.dll")
  & $compiler /nologo /target:library "/out:$probe/HostProbe.dll" @refs (Join-Path $PSScriptRoot 'AddonPeerProbe.cs');if($LASTEXITCODE -ne 0){throw 'Probe compile failed'}
  @{Version=7;DatabasePath=(Join-Path $profile 'library');FirstTimeWizardComplete=$true;EnableGameControllerSupport=$false;StartOnBoot=$false;StartInFullscreen=($peer -eq 'B');Theme='Playnite_builtin_DefaultDesktop'} | ConvertTo-Json | Set-Content (Join-Path $profile 'config.json')
  'keep-local-'+$peer | Set-Content -NoNewline (Join-Path $profile 'local-settings-sentinel.txt')

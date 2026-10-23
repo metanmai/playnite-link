@@ -206,6 +206,7 @@ namespace PlaytimeRclone
                     var games=UI(()=>GameSnapshot());
                     if(devicePreferences.SyncPlaytime)await CaptureActivityHistoryAsync();
                     await CaptureAchievements();
+                    await CaptureAchievementCustomizations();
                     var me=repository.Snapshot().Device;
                     vault.UpgradeLegacySaves(blobs,me);
                     if(!metadataOnly)CaptureLocalChanges(games); // Durable local snapshots also when the network is unavailable.
@@ -248,7 +249,7 @@ namespace PlaytimeRclone
                     var sentSessions=repository.Snapshot().Entries;
                     if(devicePreferences.SyncPlaytime)new SyncEngine().Run(repository,new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,cancelled:()=>closing||TransferStopped),Path.Combine(Root,"scratch"),Path.Combine(metadataCache,"ledger","objects"),false,false);
                     if(devicePreferences.SyncPlaytime)new SyncEngine().Run(repository,new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/activity/objects",cancelled:()=>closing||TransferStopped),Path.Combine(Root,"scratch"),Path.Combine(metadataCache,"activity","objects"),true,false);
-                    try{await SyncAchievements(metadataCache);}catch(OperationCanceledException){throw;}catch(Exception ex){achievementSyncPending=true;achievementStatus="Achievement sync is queued for retry. Local records are preserved.";logger.Warn(ex,"Achievement transfer deferred; sessions continue.");}
+                    try{await SyncAchievementRecords(metadataCache);}catch(OperationCanceledException){throw;}catch(Exception ex){achievementSyncPending=true;logger.Warn(ex,"Achievement record transfer deferred; saves and sessions continue.");}
                     // Sessions and their displayed totals must not wait for a save
                     // archive upload, missing directory or optional add-on adapter.
                     await ProjectAsync();
@@ -267,7 +268,7 @@ namespace PlaytimeRclone
                         });
                         if(!pendingLocal&&!preferencesChanged&&!unappliedRemote)
                         {
-                            await ProjectAsync();ReportStatus("",SyncDisplayState.Working,"Finishing sync");TrySyncSetup();var reviewNeeded=achievementSyncPending||projectionFailures>0||UI(()=>activityReview.Count>0)||review.Count>0;ReportStatus(reviewNeeded?"Choose a version to continue.":"Local save files are checked by a full sync before launch or when you choose Sync now.",reviewNeeded?SyncDisplayState.Review:SyncDisplayState.Completed,reviewNeeded?"Review needed":"Cloud checked");idleUnchanged=true;completed=true;return true;
+                            await ProjectAsync();ReportStatus("",SyncDisplayState.Working,"Finishing sync");await SyncAchievementDetails(metadataCache,interactive);TrySyncSetup();var reviewNeeded=achievementSyncPending||projectionFailures>0||UI(()=>activityReview.Count>0)||review.Count>0;ReportStatus(reviewNeeded?"Choose a version to continue.":"Local save files are checked by a full sync before launch or when you choose Sync now.",reviewNeeded?SyncDisplayState.Review:SyncDisplayState.Completed,reviewNeeded?"Review needed":"Cloud checked");idleUnchanged=true;completed=true;return true;
                         }
                         CaptureLocalChanges(games);
                     }
@@ -323,7 +324,7 @@ namespace PlaytimeRclone
                         if(cancelled)PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Conflict","Save versions need your review. Your local progress is kept.",NotificationType.Error));
                         else {PlayniteApi.Notifications.Remove("PlayniteLink.Conflict");if(activityReview.Count==0)PlayniteApi.Notifications.Remove("PlaytimeRclone.Error");}
                     });
-                    if(launching==null){ReportStatus("",SyncDisplayState.Working,"Finishing sync");TrySyncSetup();}
+                    if(launching==null){ReportStatus("",SyncDisplayState.Working,"Finishing sync");await SyncAchievementDetails(metadataCache,interactive);TrySyncSetup();}
                     var needsReview=achievementSyncPending||cancelled||projectionFailures>0||UI(()=>activityReview.Count>0||savedConflicts.Count>0);
                     ReportStatus(achievementSyncPending?"Some achievement updates are pending. Session and save sync continue.":unavailableSaveGames.Count>0?"Sessions synchronized; "+unavailableSaveGames.Count+" save location(s) could not be read. Check save paths.":needsReview?"Choose a version to continue.":"",needsReview?SyncDisplayState.Review:SyncDisplayState.Completed,needsReview?"Review needed":"Up to date");completed=true;return true;
                 }
@@ -424,6 +425,8 @@ namespace PlaytimeRclone
             Button(games,"Sign in to HowLongToBeat…",ShowHltbSignIn);
             activityStatusText=Label(games,activityStatus,13,true);
             var achievements=Toggle(games,"Synchronize achievements",onboarding.SyncAchievements);
+            Button(games,"Achievement providers & settings…",ShowAchievementSettings);
+            Button(games,"Achievement overview…",ShowBuiltInAchievementOverview);
             achievements.Click+=(_,e)=>{onboarding.SyncAchievements=achievements.IsChecked==true;SaveOnboarding();if(onboarding.SyncAchievements)QueueSync();};
             
             if(connected)

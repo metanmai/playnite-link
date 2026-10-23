@@ -26,4 +26,6 @@ foreach ($suite in $suites) {
 }
 & (Join-Path $PSScriptRoot 'Run-SetupCrashTests.ps1') -OutputDirectory (Join-Path $runRoot 'SetupCrashTests')
 & (Join-Path $PSScriptRoot 'Run-SaveRetirementTests.ps1') -OutputDirectory (Join-Path $runRoot 'SaveRetirementTests')
+& (Join-Path $PSScriptRoot 'Test-AchievementRetirement.ps1') -OutputDirectory (Join-Path $runRoot 'AchievementRetirementTests')
+& (Join-Path $PSScriptRoot 'Test-LinkDiagnostics.ps1') -OutputDirectory (Join-Path $runRoot 'DiagnosticsTests')
 Write-Output "All requested regression suites and helper termination tests passed. Evidence: $runRoot"

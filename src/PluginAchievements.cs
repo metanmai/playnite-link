@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using Playnite.SDK.Models;
+using Newtonsoft.Json.Linq;
 
 namespace PlaytimeRclone
 {
@@ -21,13 +22,35 @@ namespace PlaytimeRclone
         object Load(Guid id){var db=Database;if(db==null)return null;return modern?PluginActivityStore.Call(db,"LoadGameData",id.ToString()):PluginActivityStore.Call(db,"Get",id,true,false);}
         static double? Number(object obj,string name){var value=Get(obj,name);return value==null?null:(double?)Convert.ToDouble(value);}
         string Scope(Game game,object record)
-        {return Identity.Hash(modern?"pa:"+Convert.ToString(Get(record,"EffectiveProviderKey")??Get(record,"ProviderKey"))+":"+Convert.ToString(Get(record,"AppId")):"successstory:"+(game.PluginId==Guid.Empty?"manual":game.PluginId.ToString()));}
+        {
+            var identity=modern?"pa:"+Convert.ToString(Get(record,"EffectiveProviderKey")??Get(record,"ProviderKey"))+":"+Convert.ToString(Get(record,"AppId")):"successstory:"+(game.PluginId==Guid.Empty?"manual":game.PluginId.ToString());
+            var registry=modern?Get(plugin,"ProviderRegistry"):null;
+            if(registry!=null)
+            {
+                var provider=Convert.ToString(Get(record,"ProviderKey"));
+                if(!new[]{"Custom","Manual","ShadPS4","RPCS3","Xenia","Local"}.Contains(provider,StringComparer.OrdinalIgnoreCase))
+                {
+                    var live=registry.GetType().GetMethod("GetLiveSettings",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic);
+                    if(live==null)throw new NotSupportedException("The built-in achievement account interface changed; synchronization is deferred.");
+                    var settings=live.Invoke(registry,new object[]{provider});
+                    foreach(var field in new[]{"SteamUserId","RaUsername","AccountId","UserId","Username","Xuid","BattleNetAccountId","AccountName","CharacterId","Uid","PlayerId"})
+                    {var value=Convert.ToString(Get(settings,field));if(!String.IsNullOrWhiteSpace(value)){identity+=":account:"+Identity.Hash(field+":"+value.Trim().ToLowerInvariant());break;}}
+                }
+            }
+            return Identity.Hash(identity);
+        }
         public void Capture(AchievementStore store,Game game,string key,string device)
         {
-            var record=Load(game.Id);if(record==null)return;
+            var record=Load(game.Id);if(modern&&Get(plugin,"AchievementDataService")!=null)record=PluginActivityStore.Call(Get(plugin,"AchievementDataService"),"GetGameAchievementData",game.Id.ToString());if(record==null)return;
             if(Convert.ToBoolean(Get(record,modern?"ExcludedByUser":"IsIgnored")??false))return;
             var items=Get(record,modern?"Achievements":"Items") as IEnumerable;if(items==null)return;
             var scope=Scope(game,record);var seen=new HashSet<string>(StringComparer.Ordinal);
+            if(modern)
+            {
+                var metadata=new JObject{{"ProviderKey",Convert.ToString(Get(record,"ProviderKey"))},{"ProviderPlatformKey",Get(record,"ProviderPlatformKey")==null?null:JToken.FromObject(Get(record,"ProviderPlatformKey"))},{"AppId",Convert.ToInt32(Get(record,"AppId")??0)}};var rows=new JArray();
+                foreach(var item in items){var id=Convert.ToString(Get(item,"ApiName"));if(String.IsNullOrWhiteSpace(id))continue;var row=new JObject();foreach(var field in AchievementCatalog.Fields){var value=Get(item,field);if(field.EndsWith("IconPath",StringComparison.Ordinal)&&value!=null){Uri uri;if(File.Exists(Convert.ToString(value))&&new FileInfo(Convert.ToString(value)).Length<=8*1024*1024){using(var image=File.OpenRead(Convert.ToString(value)))value=new BlobStore(Path.Combine(Path.GetDirectoryName(store.Objects),"blobs")).Put(image).ToString();}else if(!Uri.TryCreate(Convert.ToString(value),UriKind.Absolute,out uri)||uri.Scheme!="https"||!String.IsNullOrEmpty(uri.UserInfo))value=null;}row[field]=value==null?JValue.CreateNull():JToken.FromObject(value);}rows.Add(row);}metadata["Achievements"]=rows;
+                new AchievementCatalogStore(Path.GetDirectoryName(store.Objects)).Observe(new AchievementCatalog{Game=key,Scope=scope,CreatedUtc=DateTimeOffset.UtcNow.ToString("O"),Data=metadata});
+            }
             var batch=new List<AchievementRecord>();
             foreach(var item in items)
             {
@@ -44,9 +67,24 @@ namespace PlaytimeRclone
         }
         public void Project(AchievementStore store,Game game,string key)
         {
-            var record=Load(game.Id);if(record==null||Convert.ToBoolean(Get(record,modern?"ExcludedByUser":"IsIgnored")??false))return;
+            var record=Load(game.Id);
+            bool catalogChanged=false;
+            if(modern)
+            {
+                var catalogType=plugin.GetType().Assembly.GetType("PlayniteAchievements.Models.Achievements.GameAchievementData");
+                var matches=catalogType==null?new AchievementCatalog[0]:new AchievementCatalogStore(Path.GetDirectoryName(store.Objects)).ReadAll().Where(c=>c.Game==key&&c.Scope==Scope(game,c.Data.ToObject(catalogType))&&(record==null||c.Scope==Scope(game,record))).GroupBy(c=>c.Scope).Select(g=>g.OrderByDescending(c=>DateTimeOffset.Parse(c.CreatedUtc)).ThenBy(c=>c.Hash(),StringComparer.Ordinal).First()).ToArray();
+                if(matches.Length==1&&(record==null||!Convert.ToBoolean(Get(record,"ExcludedByUser")??false)))
+                {
+                    var payload=record==null?(JObject)matches[0].Data.DeepClone():JObject.FromObject(record);
+                    var rows=(JArray)payload["Achievements"];
+                    if(record!=null){var known=new HashSet<string>(rows.Select(r=>(string)r["ApiName"]),StringComparer.Ordinal);foreach(var row in ((JArray)matches[0].Data["Achievements"]).OfType<JObject>())if(known.Add((string)row["ApiName"])){rows.Add(row.DeepClone());catalogChanged=true;}}
+                    else catalogChanged=true;
+                    if(catalogChanged){foreach(var row in rows.OfType<JObject>())foreach(var field in new[]{"UnlockedIconPath","LockedIconPath"}){var reference=(string)row[field];if(reference!=null&&reference.StartsWith("blob:",StringComparison.Ordinal))row[field]=MaterializeIcon(Path.GetDirectoryName(store.Objects),reference);}record=payload.ToObject(catalogType);}
+                }
+            }
+            if(record==null||Convert.ToBoolean(Get(record,modern?"ExcludedByUser":"IsIgnored")??false))return;
             var items=Get(record,modern?"Achievements":"Items") as IEnumerable;if(items==null)return;
-            var scope=Scope(game,record);var merged=store.ForGame(key).Where(r=>r.Scope==scope).ToDictionary(r=>r.Id,StringComparer.Ordinal);bool changed=false;
+            var scope=Scope(game,record);var merged=store.ForGame(key).Where(r=>r.Scope==scope).ToDictionary(r=>r.Id,StringComparer.Ordinal);bool changed=catalogChanged;
             foreach(var item in items)
             {
                 AchievementRecord value;if(!merged.TryGetValue(Convert.ToString(Get(item,"ApiName")),out value))continue;
@@ -64,6 +102,15 @@ namespace PlaytimeRclone
             if(modern){var result=PluginActivityStore.Call(Database,"SaveGameData",game.Id.ToString(),record);if(!Convert.ToBoolean(Get(result,"Success")??false))throw new IOException("Playnite Achievements cache update deferred.");}
             else PluginActivityStore.Call(Database,"Update",record);
         }
+        static string MaterializeIcon(string root,string reference)
+        {
+            var blob=BlobReference.Parse(reference);var folder=Path.Combine(root,"achievement-icons");Directory.CreateDirectory(folder);SaveFiles.CheckAncestors(folder);
+            var file=Path.Combine(folder,blob.Hash+".png");SaveFiles.CheckAncestors(file);
+            if(File.Exists(file)&&new FileInfo(file).Length==blob.Length&&SaveMigrationFiles.Hash(file)==blob.Hash)return file;
+            var temporary=file+"."+Guid.NewGuid().ToString("N")+".tmp";
+            try{using(var output=File.Create(temporary))new BlobStore(Path.Combine(root,"blobs")).CopyVerified(reference,output);if(File.Exists(file))File.Replace(temporary,file,null);else File.Move(temporary,file);return file;}
+            finally{if(File.Exists(temporary))File.Delete(temporary);}
+        }
     }
     public sealed partial class PlaytimePlugin
     {
@@ -71,7 +118,7 @@ namespace PlaytimeRclone
         string achievementStatus="Achievement history is stored locally. Sync to check the cloud.";
         bool achievementSyncPending;
         AchievementAdapter[] AchievementAdapters()
-        {return PlayniteApi.Addons.Plugins.Where(p=>p.GetType().FullName=="SuccessStory.SuccessStory"||p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin").Select(p=>new AchievementAdapter(p,p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin")).ToArray();}
+        {return PlayniteApi.Addons.Plugins.Concat(achievementEngine==null?new Playnite.SDK.Plugins.Plugin[0]:new Playnite.SDK.Plugins.Plugin[]{achievementEngine}).Distinct().Where(p=>p.GetType().FullName=="SuccessStory.SuccessStory"||p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin").Select(p=>new AchievementAdapter(p,p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin")).ToArray();}
         private async Task CaptureAchievements()
         {
             achievementSyncPending=false;achievementStatus="Achievement sync is pending.";
@@ -87,6 +134,7 @@ namespace PlaytimeRclone
         {
             if(!onboarding.SyncAchievements)return;
             var store=AchievementData;var incoming=Path.Combine(metadataCache,"achievements","objects");store.Import(incoming);
+            var catalogs=new AchievementCatalogStore(Root);var catalogCache=Path.Combine(metadataCache,"achievement-catalogs","objects");catalogs.Import(catalogCache);var schemas=catalogs.ReadAll();var pendingSchemas=schemas.Where(c=>!File.Exists(Path.Combine(catalogCache,c.Hash()+".json"))).ToArray();new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||TransferStopped).PushFiles(blobs.DirectoryPath,pendingSchemas.SelectMany(c=>c.IconReferences()).Select(r=>BlobReference.Parse(r).Hash+".blob"));new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/achievement-catalogs/objects",cancelled:()=>closing||TransferStopped).PushFiles(catalogs.Objects,pendingSchemas.Select(c=>c.Hash()+".json"));var iconData=new SortedDictionary<string,string>(StringComparer.Ordinal);var iconIndex=0;foreach(var reference in schemas.Where(c=>repository.Snapshot().Mappings.Values.Any(m=>m.Key==c.Game)).SelectMany(c=>c.IconReferences()).Distinct())iconData.Add("icon"+(iconIndex++),reference);blobs.Ensure(iconData);
             var transport=new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/achievements/objects",cancelled:()=>closing||TransferStopped);
             transport.PushFiles(store.Objects,Directory.GetFiles(store.Objects,"*.json").Where(p=>!File.Exists(Path.Combine(incoming,Path.GetFileName(p)))).Select(Path.GetFileName));
             achievementStatus="Achievements synchronized with your personal vault.";
@@ -94,6 +142,17 @@ namespace PlaytimeRclone
             {
                 CheckTransfer();UI(()=>{var game=PlayniteApi.Database.Games.Get(new Guid(pair.Key));if(game==null||GameBusy(game.Id))return;foreach(var adapter in adapters)try{adapter.Project(store,game,pair.Value.Key);}catch(Exception ex){achievementSyncPending=true;achievementStatus="Achievement history synced; an optional add-on display update is pending.";logger.Warn(ex,"Achievement display update deferred.");}});await Task.Delay(1);
             }
+        }
+        private Task SyncAchievementRecords(string metadataCache)
+        {
+            if(!onboarding.SyncAchievements)return Task.FromResult(0);
+            var store=AchievementData;var incoming=Path.Combine(metadataCache,"achievements","objects");store.Import(incoming);
+            new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/achievements/objects",cancelled:()=>closing||TransferStopped).PushFiles(store.Objects,Directory.GetFiles(store.Objects,"*.json").Where(p=>!File.Exists(Path.Combine(incoming,Path.GetFileName(p)))).Select(Path.GetFileName));return Task.FromResult(0);
+        }
+        async Task SyncAchievementDetails(string metadataCache,bool interactive)
+        {
+            try{await SyncAchievementCustomizations(metadataCache,interactive);}catch(OperationCanceledException){throw;}catch(Exception ex){achievementSyncPending=true;achievementStatus="Achievement customizations are queued for retry. Local records are preserved.";logger.Warn(ex,"Achievement customization transfer deferred; sessions continue.");}
+            try{await SyncAchievements(metadataCache);}catch(OperationCanceledException){throw;}catch(Exception ex){achievementSyncPending=true;achievementStatus="Achievement sync is queued for retry. Local records are preserved.";logger.Warn(ex,"Achievement transfer deferred; sessions continue.");}
         }
         private void ShowAchievements(Game game)
         {

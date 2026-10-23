@@ -7,6 +7,9 @@ param(
     [switch]$OnboardingProbe,
     [switch]$DevicesProbe,
     [switch]$SaveManagerProbe,
+    [switch]$AchievementPeer,
+    [string]$AchievementPhase='author',
+    [string]$SharedAchievementCloud='',
     [string]$BuildDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -24,8 +27,10 @@ New-Item -ItemType Directory -Force $appPath,$profilePath,$subjectPath,$probePat
 & robocopy $PlaynitePath $appPath /E /XD Extensions 'User Data' /XF '*.pdb' '*.log' 'unins*' /NFL /NDL /NJH /NJS /NP
 if ($LASTEXITCODE -ge 8) { throw 'Failed to copy installed Playnite to isolated test lab' }
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll'),(Join-Path $buildDir 'extension.yaml') $subjectPath
+if(Test-Path (Join-Path $buildDir 'StartPage.SDK.dll')){Copy-Item (Join-Path $buildDir 'StartPage.SDK.dll') $subjectPath}
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll'),(Join-Path $projectRoot 'src/RetireSaveManager.ps1') $subjectPath
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $subjectPath
+if(Test-Path (Join-Path $buildDir 'AchievementEngine')){Copy-Item (Join-Path $buildDir 'AchievementEngine') $subjectPath -Recurse}
 if(Test-Path (Join-Path $buildDir 'SetupApply.ps1')){Copy-Item (Join-Path $buildDir 'SetupApply.ps1') $subjectPath}
 $commonPath = Join-Path $appPath 'Common.config'
 $pipeName = 'net.pipe://localhost/PlaytimeProbe' + [Guid]::NewGuid().ToString('N')
@@ -42,11 +47,11 @@ Type: GenericPlugin
 '@ | Set-Content (Join-Path $probePath 'extension.yaml')
 $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
-$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll","/r:$buildDir/SaveManager.Core.dll",'/r:System.IO.Compression.dll','/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
+$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll","/r:$buildDir/StartPage.SDK.dll","/r:$buildDir/SaveManager.Core.dll",'/r:System.IO.Compression.dll','/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll') $probePath
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll') $probePath
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $probePath
-$probeSource=if($SaveManagerProbe){'SaveManagerHostProbe.cs'}elseif($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}elseif($DevicesProbe){'DevicesHostProbe.cs'}else{'PersonalHostProbe.cs'}
+$probeSource=if($AchievementPeer){'AchievementPeerProbe.cs'}elseif($SaveManagerProbe){'SaveManagerHostProbe.cs'}elseif($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}elseif($DevicesProbe){'DevicesHostProbe.cs'}else{'PersonalHostProbe.cs'}
 & $compilerPath /nologo /target:library "/out:$probePath/HostProbe.dll" @references (Join-Path $PSScriptRoot $probeSource)
 if ($LASTEXITCODE -ne 0) { throw 'Host probe compile failed' }
 & $compilerPath /nologo /target:winexe "/out:$profilePath/FixtureGame.exe" (Join-Path $PSScriptRoot 'FixtureGame.cs')
@@ -55,7 +60,8 @@ Add-Type -Path (Join-Path $appPath 'Newtonsoft.Json.dll')
 Add-Type -Path (Join-Path $appPath 'Playnite.SDK.dll')
 Add-Type -Path (Join-Path $subjectPath 'PlayniteLink.dll')
 $repository = [PlaytimeRclone.Repository]::new((Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767'))
-$repository.Enroll('f3d3b83a-fc3f-40ec-87c5-24094bdd81d9','manual:demo-adventure',100,100)
+$localGameId=if($AchievementPeer -and $AchievementPhase -eq 'receive'){[Guid]::NewGuid().ToString()}else{'f3d3b83a-fc3f-40ec-87c5-24094bdd81d9'}
+$repository.Enroll($localGameId,'manual:demo-adventure',100,100)
 $repository.Dispose()
 if($LockProbe){
  $protection=[PlaytimeRclone.LocalSecurity]::new((Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767'))
@@ -69,6 +75,13 @@ if (!(Test-Path $rcloneExe)) { throw 'Set rcloneExe to your installed Rclone exe
 foreach($area in @('devices','ledger','activity','revisions','setup')){New-Item -ItemType Directory -Force (Join-Path $profilePath ('Cloud/personal/playnite-link-v1/'+$area+'/objects')) | Out-Null}
 $rcloneConfig = Join-Path $profilePath 'fixture-rclone.conf'
 "[vault]`ntype = alias`nremote = $profilePath/Cloud`n" | Set-Content $rcloneConfig
+if($AchievementPeer){
+ if(!$SharedAchievementCloud){throw 'Supply a fresh shared local cloud path for the achievement peer test'}
+ New-Item -ItemType Directory -Force $SharedAchievementCloud|Out-Null
+ foreach($area in @('devices','ledger','activity','revisions','setup','receipts','backups','achievements','achievement-catalogs','achievement-customizations')){New-Item -ItemType Directory -Force (Join-Path $SharedAchievementCloud ('personal/playnite-link-v1/'+$area+'/objects'))|Out-Null}
+ "[vault]`ntype = alias`nremote = $SharedAchievementCloud`n" | Set-Content $rcloneConfig
+ $AchievementPhase | Set-Content (Join-Path $profilePath 'achievement-peer-phase.txt')
+}
 @{ RcloneExe=$rcloneExe;ConfigFile=$rcloneConfig;RemoteFolder='vault:personal' } | ConvertTo-Json | Set-Content (Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767/rclone-settings.json')
 if($OnboardingProbe){
  $extensionData=Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767'
@@ -87,7 +100,7 @@ $resultPath = Join-Path $profilePath 'host-result.json'
 $deadline = [DateTime]::UtcNow.AddSeconds(240)
 while (!(Test-Path $resultPath) -and [DateTime]::UtcNow -lt $deadline -and !$testProcess.HasExited) { Start-Sleep -Seconds 1 }
 # Shutdown is routed to this lab's unique named pipe, never the user's instance.
-if (!$KeepOpen -and !$OnboardingProbe -and !$testProcess.HasExited) { Start-Process $exePath -ArgumentList '--shutdown' -WindowStyle Hidden | Out-Null }
+if (!$KeepOpen -and !$OnboardingProbe -and !$testProcess.HasExited) { if(!$testProcess.WaitForExit(15000)){[void]$testProcess.CloseMainWindow();if(!$testProcess.WaitForExit(15000)){throw 'The isolated test instance did not close cleanly'}} }
 if (!(Test-Path $resultPath)) { throw "Host probe did not finish; inspect $profilePath" }
 if($OnboardingProbe -and (Get-Content $resultPath -Raw|ConvertFrom-Json).passed){
  if(!$testProcess.HasExited -and !$testProcess.WaitForExit(15000)){throw 'First instance did not exit'}

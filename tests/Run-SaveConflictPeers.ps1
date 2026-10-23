@@ -8,9 +8,10 @@ foreach($peer in @('A','B')){
  $app=Join-Path $Lab "$peer/app";$profile=Join-Path $Lab "$peer/p";if(!(Test-Path "$profile/PROBE-ONLY")){throw 'Missing test marker'}
  $probe=Join-Path $profile 'Extensions/HostProbe';$data=Join-Path $profile 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767'
  Copy-Item "$projectRoot/build/PlayniteLink.dll" "$profile/Extensions/PlayniteLink/PlayniteLink.dll" -Force;Copy-Item "$projectRoot/build/PlayniteLink.dll" $probe -Force;Copy-Item "$projectRoot/extension.yaml" "$profile/Extensions/PlayniteLink/extension.yaml" -Force
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $probe -Force
  $o=Get-Content "$data/onboarding.json" -Raw|ConvertFrom-Json;$o.SyncPaused=$true;$o|ConvertTo-Json|Set-Content "$data/onboarding.json"
  $prefs=Get-Content "$data/device-settings.json" -Raw|ConvertFrom-Json;$prefs.AutoSync=$false;$prefs|ConvertTo-Json|Set-Content "$data/device-settings.json"
- $refs=@("/r:$app/Playnite.SDK.dll","/r:$app/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationFramework.dll","/r:$wpf/PresentationCore.dll")
+ $refs=@("/r:$app/Playnite.SDK.dll","/r:$app/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll","/r:$projectRoot/build/StartPage.SDK.dll",'/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationFramework.dll","/r:$wpf/PresentationCore.dll")
  & $compiler /nologo /target:library "/out:$probe/HostProbe.dll" @refs (Join-Path $projectRoot 'tests/SaveConflictPeerProbe.cs');if($LASTEXITCODE-ne 0){throw 'Compile failed'}
 }
 $steps=@(

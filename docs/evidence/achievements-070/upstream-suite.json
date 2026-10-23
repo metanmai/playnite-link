@@ -1,0 +1,9 @@
+{
+  "failed": 0,
+  "skipped": 1,
+  "trxSha256": "AB77AC4A0F662EC26409E50F00B133A9714248C4E956D7AF4C37DB3220674E3F",
+  "sdk": "6.14.0",
+  "windowsCrLfSourceCheckout": true,
+  "passed": 4981,
+  "engine": "PlayniteAchievements 4.1.1"
+}

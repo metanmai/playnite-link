@@ -1,18 +1,28 @@
-# Playnite Link 0.6.3
+# Playnite Link 0.7.0
 
 Personal-cloud save, playtime and preference sync for Playnite. **Your storage account owns the vault. There is no Playnite Link account server, hosted user directory, subscription, or central save database.**
 
-This is an independent extension, not an official Playnite product. Version 0.6.3 targets Windows 10/11, Playnite 10 and .NET Framework 4.8. It incorporates Jurangren's Save Manager 2.0.3 backup core under AGPL-3.0. Corresponding source accompanies the package. An existing Rclone installation is reused, or an official pinned, checksum-verified runtime is prepared in the background.
+This is an independent extension, not an official Playnite product. Version 0.7.0 targets Windows 10/11, Playnite 10 and .NET Framework 4.8. It incorporates Jurangren's Save Manager 2.0.3 backup core under AGPL-3.0. Corresponding source accompanies the package. An existing Rclone installation is reused, or an official pinned, checksum-verified runtime is prepared in the background.
 
 ## Install and connect
 
-1. Open `release/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_6_3.pext` in Playnite and restart when prompted. Upgrade every device to 0.6.0 before using multiple save sources.
+1. Open `release/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_7_0.pext` in Playnite and restart when prompted. Upgrade every device to 0.6.0 before using multiple save sources.
 2. Open **main menu → Playnite Link → Personal cloud account & settings**.
 3. Select **Connect**, choose an existing authorized storage connection, and connect. The default vault folder is **PlayniteLink**. Existing Rclone and Save Manager configurations are discovered automatically. Advanced configuration remains available for a different vault path.
 4. New connections support Google Drive, Dropbox, OneDrive, pCloud, WebDAV and Cloudflare R2. Browser providers use their sign-in pages; WebDAV and R2 ask for endpoint/access credentials locally. Google Drive requires your own Desktop OAuth client JSON to avoid Rclone's shared project quota. R2 vault destinations include the bucket name. New connections use a unique local configuration file. Credentials are never shared with other devices.
 5. On the second device, authorize the same storage account independently and select the **same folder in that account**. Remote names can differ between devices. The first successful connection pins each local profile to its destination to prevent accidentally mixing personal accounts. To change vaults, use **Switch vault / start fresh**; previous local profiles and cloud history are retained.
 
 The extension creates only `playnite-link-v1` under the chosen destination, containing immutable ledger, revision and device metadata plus content-addressed save blobs. Use a dedicated personal vault folder. Users who want encryption at rest can select an [Rclone crypt remote](https://rclone.org/crypt/); a normal remote does not encrypt save contents at rest.
+
+## Sidebar and built-in achievements (0.7.0)
+
+Click **Playnite Link** in Playnite's sidebar for the dashboard inside Playnite. It shows live cloud status and gives access to sync/pause, games and session history, saves, backups, achievements, connected devices, protection and diagnostics. The separate optional saves shortcut can be hidden without hiding the dashboard.
+
+Link includes the original Playnite Achievements 4.1.1 engine as an in-process component: provider sign-in and refresh, full achievement views/settings, manual tracking and custom achievements, notes/goals/categories/icons, friends, scores, notifications/capture, themes and StartPage interfaces. A separate achievement add-on is unnecessary. Open **Achievement providers & settings** from the dashboard. Sign into providers independently on each device. Platform APIs remain authoritative; cloud metadata never awards achievements to a platform account.
+
+For games linked to the same cloud identity, Link exchanges achievement catalogs, earned states/dates, compatible progress, points/rarity/icons and portable per-game customizations, including notes, goals and explicit manual relocks/deletions. Provider refreshes and personal edits queue background synchronization. Independent account identities are separated where the provider exposes an identity. Credentials, friends' caches, capture media and machine-specific appearance/capture/notification preferences remain local; the full original tools are available on each device. Concurrent customization edits preserve both versions for review. Older clients keep their supported data but need 0.7.0 for the built-in engine and full customization exchange.
+
+The original MIT engine and source are pinned in `vendor/PlayniteAchievements`. An existing supported standalone installation is preserved outside the active extensions folder after shutdown; its user data stays in place. There is no migration wizard. Unknown/newer standalone versions are preserved and reported instead of silently downgraded. See [the 0.7.0 acceptance report](docs/ACCEPTANCE-0.7.0.md) for test evidence and hardware/provider limits.
 
 ## Link a game on both devices
 

@@ -20,6 +20,9 @@ try {
  if($protectionHash){Copy-Item -LiteralPath $protectedFile -Destination $backup}
  Get-ChildItem -LiteralPath $extension -File | Copy-Item -Destination $backup
  Copy-Item (Join-Path $projectRoot 'src/SetupApply.ps1'),(Join-Path $projectRoot 'build/PlayniteLink.dll'),(Join-Path $projectRoot 'extension.yaml'),(Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'LICENSE'),(Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/AchievementEngine') $extension -Recurse -Force
+ Copy-Item (Join-Path $projectRoot 'build/SaveManager.Core.dll'),(Join-Path $projectRoot 'build/Microsoft.Toolkit.Uwp.Notifications.dll'),(Join-Path $projectRoot 'src/RetireAchievementAddon.ps1') $extension -Force
  $reportPath=Join-Path $extension 'docs';New-Item -ItemType Directory -Force $reportPath | Out-Null
  Copy-Item (Join-Path $projectRoot 'docs/ACCEPTANCE.md'),(Join-Path $projectRoot 'docs/evidence/acceptance-tally.json') $reportPath -Force
  # Archive the temporary companion; never launch test games in the normal profile again.

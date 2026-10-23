@@ -13,10 +13,14 @@ while((Get-Process Playnite.DesktopApp -ErrorAction SilentlyContinue | Where-Obj
 if(Get-Process Playnite.DesktopApp -ErrorAction SilentlyContinue | Where-Object Path -EQ $liveExe){throw 'Playnite did not close gracefully; installation was not changed.'}
 try {
  Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll'),(Join-Path $projectRoot 'extension.yaml') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/AchievementEngine') $extension -Recurse -Force
+ Copy-Item (Join-Path $projectRoot 'build/SaveManager.Core.dll'),(Join-Path $projectRoot 'build/Microsoft.Toolkit.Uwp.Notifications.dll'),(Join-Path $projectRoot 'src/RetireAchievementAddon.ps1') $extension -Force
  Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probe -Force
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $probe -Force
  $compiler="$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
  $wpf="$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
- $references=@("/r:$PlaynitePath/Playnite.SDK.dll","/r:$PlaynitePath/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Security.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationCore.dll","/r:$wpf/PresentationFramework.dll")
+ $references=@("/r:$PlaynitePath/Playnite.SDK.dll","/r:$PlaynitePath/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll","/r:$projectRoot/build/StartPage.SDK.dll",'/r:System.Core.dll','/r:System.Security.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationCore.dll","/r:$wpf/PresentationFramework.dll")
  & $compiler /nologo /target:library "/out:$probe/LiveHostProbe.dll" @references (Join-Path $PSScriptRoot 'LiveHostProbe.cs')
  if($LASTEXITCODE -ne 0){throw 'Live probe compilation failed'}
 } finally {Start-Process $liveExe -ArgumentList '--nolibupdate','--hidesplashscreen' -WindowStyle Hidden | Out-Null}

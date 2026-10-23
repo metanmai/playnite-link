@@ -104,10 +104,12 @@ namespace PlaytimeRclone
         {if(repository==null)return;UI(()=>{ManagerOptions.Installed[args.Game.Id.ToString()]=false;PersistManagerOptions();});}
         public override IEnumerable<SidebarItem> GetSidebarItems()
         {
-            if(repository==null||!ManagerOptions.ShowSidebar)return new SidebarItem[0];
-            return new[]{new SidebarItem{Title="Playnite Link saves",Icon="\uE8B7",Type=SiderbarItemType.Button,Activated=()=>Guard(()=>{
+            if(repository==null)return new SidebarItem[0];
+            var items=new List<SidebarItem>{new SidebarItem{Title="Playnite Link",Icon="\uE71B",Type=SiderbarItemType.View,Opened=CreateLinkSidebarView}};
+            if(ManagerOptions.ShowSidebar)items.Add(new SidebarItem{Title="Playnite Link saves",Icon="\uE8B7",Type=SiderbarItemType.Button,Activated=()=>Guard(()=>{
                 var selected=PlayniteApi.MainView.SelectedGames.ToList();if(selected.Count==1){Mapping map;if(repository.Snapshot().Mappings.TryGetValue(selected[0].Id.ToString(),out map))ShowSaveManager(selected[0],map.Key);else Enroll(selected[0]);}else ManageGames();
-            })}};
+            })});
+            items.AddRange(AchievementSidebarItems());return items;
         }
         async void QuickBackup(IEnumerable<Game> games)
         {

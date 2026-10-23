@@ -21,4 +21,16 @@ Playnite Link adapts the user's earlier PlaytimeRclone project (MIT): ledger, Rc
 
 AuthService at `/home/metanmai/Code/auth-service` was inspected. Its mobile/Supabase authentication runtime is not a dependency: the user explicitly requested personal-drive ownership with no centralized account authority. Storage-provider sign-in replaces an application account server.
 
-No Rclone OAuth credentials, SDK assemblies, test companion, user saves or fixture accounts are included in the release package.
+No Rclone OAuth credentials, Playnite SDK assemblies, test companion, user saves or fixture accounts are included in the release package.
+Native HLTB protocol handling references Lacro59/playnite-howlongtobeat-plugin at commit 809c1890b0ce27942fd92c9b50ae7e38a8c89e30 (MIT, copyright 2020 Lacro59). The license is included in vendor/HowLongToBeat-MIT-LICENSE in CorrespondingSource.zip. Link does not require or load that add-on to update HLTB progress.
+
+
+Playnite Achievements 4.1.1, copyright 2026 Justin Delano (MIT), is bundled as
+Link's in-process achievement component. No separate extension registration is
+installed. Its unmodified DLLs, localization, media and dependency notices remain
+inside AchievementEngine; its extension manifest is renamed engine-manifest.yaml.
+See vendor/PlayniteAchievements/UPSTREAM.md and LICENSE for provenance, pinned
+hashes and the accompanying source snapshot. Upstream third-party notices,
+including notification audio licensing, are retained with the component.
+StartPage.SDK.dll is shipped at Link's root for the original StartPage interface;
+StartPage.SDK 1.0.0 by felixkmh is MIT-licensed; its license is included as AchievementEngine/StartPage-LICENSE.txt. The bundled DLL matches the NuGet 1.0.0 binary (SHA-256 22A41F8A8B4C602074237F6E40D5AF52398C8B7809A77FBAC585AE97C03922F5).

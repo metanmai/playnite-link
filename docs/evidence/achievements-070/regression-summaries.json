@@ -1,0 +1,86 @@
+[
+  {
+    "Suite": "AchievementTests",
+    "PassLines": 1,
+    "LastResult": "PASS achievement merge, adapters, retries and real Rclone: 28 checks",
+    "LogSha256": "62310145EB1DEF89CFD956367351FD0EBF74DB9D2A14281A7E85F465207B5CFE"
+  },
+  {
+    "Suite": "ActivityTests",
+    "PassLines": 18,
+    "LastResult": "RESULT 18 passed, 0 failed",
+    "LogSha256": "4941014D0D345C3411697C19CC4314D5C0A356929215A80F1A8D45D9AA7BBDF3"
+  },
+  {
+    "Suite": "ApplicationLockTests",
+    "PassLines": 15,
+    "LastResult": "RESULT 15 passed, 0 failed",
+    "LogSha256": "BCB63A903988B05AFD72D5B1043DEFF5CA85BD1D2D709B5F92959873D9DC901A"
+  },
+  {
+    "Suite": "AuditTests",
+    "PassLines": 8,
+    "LastResult": "RESULT 8 passed, 0 failed",
+    "LogSha256": "6ACF36F9631282335A1B53D039A65788B60545D6A99BEEC8B37EEC1A5B2CAF0F"
+  },
+  {
+    "Suite": "CrashRecoveryTests",
+    "PassLines": 11,
+    "LastResult": "11 passed, 0 failed",
+    "LogSha256": "182F8D243FB62482C466F60C22C330B992D4A400569A14CD17F7BBB89BD83891"
+  },
+  {
+    "Suite": "HltbTests",
+    "PassLines": 11,
+    "LastResult": "RESULT 11 passed, 0 failed",
+    "LogSha256": "5AD01E527C744CAC2E933813D9402B95FFC5AF38D9F22E5C3B3631003A400B48"
+  },
+  {
+    "Suite": "MetadataTransferTests",
+    "PassLines": 8,
+    "LastResult": "RESULT 8 passed, 0 failed",
+    "LogSha256": "83831A2CB9FB680E85444935183BD7BBB756F307A720CF4FF26FD1A25887A305"
+  },
+  {
+    "Suite": "NativeHltbTests",
+    "PassLines": 1,
+    "LastResult": "PASS native HLTB without add-ons: 27 checks",
+    "LogSha256": "14916D32CDC73A717495E662CB580BE32E1899A1D72A176F9566861121F0270F"
+  },
+  {
+    "Suite": "SaveManagerReplacementTests",
+    "PassLines": 44,
+    "LastResult": "RESULT 44 passed, 0 failed",
+    "LogSha256": "0A747F4DE201B30694906FE038103143EEA65100A6D070A5A98DD3B7B68BF06F"
+  },
+  {
+    "Suite": "SecurityTests",
+    "PassLines": 9,
+    "LastResult": "RESULT 9 passed, 0 failed",
+    "LogSha256": "5BED877A1E5209F7F95DD60F35A5D439D34B1663E4E0A82B8A1AAD19D7108C44"
+  },
+  {
+    "Suite": "SetupTests",
+    "PassLines": 18,
+    "LastResult": "RESULT 18 passed, 0 failed",
+    "LogSha256": "A75DAF73AB1732B1132480749D9C9F32D7BB823D5FC1E403C8A84A3A76EBFD6D"
+  },
+  {
+    "Suite": "StreamingTests",
+    "PassLines": 17,
+    "LastResult": "RESULT 17 passed, 0 failed",
+    "LogSha256": "DDCC39D53D90CA2B4980EF2508F5E2CFAB4AF286FD5C34AC578F058CAD76AE31"
+  },
+  {
+    "Suite": "Tests",
+    "PassLines": 61,
+    "LastResult": "RESULT 61 passed, 0 failed",
+    "LogSha256": "57A49D6D25A50F7C9C68063AA13F5034DE3C6435FE0ED4C40687C8AB7A1F7885"
+  },
+  {
+    "Suite": "VaultTests",
+    "PassLines": 64,
+    "LastResult": "RESULT 64 passed, 0 failed",
+    "LogSha256": "C424FE33551D4641BB2207891E7F438978F281F5D4DBAB56D0D2F6817C5E29FA"
+  }
+]

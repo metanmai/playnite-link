@@ -14,14 +14,18 @@ if(Get-Process Playnite.DesktopApp -ErrorAction SilentlyContinue | Where-Object 
 New-Item -ItemType Directory -Force $extension,$probe,$data | Out-Null
 if(Test-Path (Join-Path $extension 'PlayniteLink.dll')){Copy-Item (Join-Path $extension 'PlayniteLink.dll') (Join-Path $data ('previous-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmss')+'.dll'))}
 Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll'),(Join-Path $projectRoot 'extension.yaml'),(Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'LICENSE'),(Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $extension -Force
+ Copy-Item (Join-Path $projectRoot 'build/AchievementEngine') $extension -Recurse -Force
+ Copy-Item (Join-Path $projectRoot 'build/SaveManager.Core.dll'),(Join-Path $projectRoot 'build/Microsoft.Toolkit.Uwp.Notifications.dll'),(Join-Path $projectRoot 'src/RetireAchievementAddon.ps1') $extension -Force
 $compiler="$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $wpf="$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
-$references=@("/r:$PlaynitePath/Playnite.SDK.dll","/r:$PlaynitePath/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll",'/r:System.Core.dll','/r:System.Security.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationCore.dll","/r:$wpf/PresentationFramework.dll")
+$references=@("/r:$PlaynitePath/Playnite.SDK.dll","/r:$PlaynitePath/Newtonsoft.Json.dll","/r:$projectRoot/build/PlayniteLink.dll","/r:$projectRoot/build/StartPage.SDK.dll",'/r:System.Core.dll','/r:System.Security.dll','/r:System.Xaml.dll',"/r:$wpf/WindowsBase.dll","/r:$wpf/PresentationCore.dll","/r:$wpf/PresentationFramework.dll")
 & $compiler /nologo /target:exe "/out:$projectRoot/build/LiveSetup.exe" @references (Join-Path $PSScriptRoot 'LiveSetup.cs')
 if($LASTEXITCODE -ne 0){throw 'Live fixture setup compilation failed'}
 & $compiler /nologo /target:library "/out:$probe/LiveHostProbe.dll" @references (Join-Path $PSScriptRoot 'LiveHostProbe.cs')
 if($LASTEXITCODE -ne 0){throw 'Live host probe compilation failed'}
 Copy-Item (Join-Path $projectRoot 'build/PlayniteLink.dll') $probe -Force
+ Copy-Item (Join-Path $projectRoot 'build/StartPage.SDK.dll') $probe -Force
 @'
 Id: LiveHostProbe_f8bc8da6-03f2-485c-acd2-b62817acff5e
 Name: Playnite Link temporary live-cloud probe

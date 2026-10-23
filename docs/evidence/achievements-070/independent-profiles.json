@@ -1,0 +1,29 @@
+[
+  {
+    "passed": true,
+    "phase": "author",
+    "checks": 9,
+    "localGameId": "f3d3b83a-fc3f-40ec-87c5-24094bdd81d9",
+    "cloudGameKey": "35b1d70cc6ed99b8f9d97bf060e0a08fd08cf0a0f4b324cd645e0e087548c595",
+    "device": "c5cd1bf84f9445b783632992ab33a6f6",
+    "engineBuiltIn": true
+  },
+  {
+    "passed": true,
+    "phase": "receive",
+    "checks": 11,
+    "localGameId": "a1209b82-2d29-4472-8d6f-ce8a2b87c81c",
+    "cloudGameKey": "35b1d70cc6ed99b8f9d97bf060e0a08fd08cf0a0f4b324cd645e0e087548c595",
+    "device": "741ebf709cbb4143b7702a1e16e5e4b2",
+    "engineBuiltIn": true
+  },
+  {
+    "passed": true,
+    "phase": "verify",
+    "checks": 10,
+    "localGameId": "f3d3b83a-fc3f-40ec-87c5-24094bdd81d9",
+    "cloudGameKey": "35b1d70cc6ed99b8f9d97bf060e0a08fd08cf0a0f4b324cd645e0e087548c595",
+    "device": "c5cd1bf84f9445b783632992ab33a6f6",
+    "engineBuiltIn": true
+  }
+]
