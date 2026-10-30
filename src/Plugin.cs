@@ -26,6 +26,8 @@ namespace PlaytimeRclone
         private int syncing;
         private bool closing;
         private readonly HashSet<string> live = new HashSet<string>();
+        private const int SessionSettleMilliseconds = 2000;
+        private readonly Dictionary<Guid, Action> settlingSessions = new Dictionary<Guid, Action>();
         private string status = "Not configured. Sessions are stored locally after game enrollment.";
         private CloudSettings settings;
         private string syncRoot;
@@ -264,6 +266,7 @@ namespace PlaytimeRclone
             if(setupRestartPending){args.CancelStartup=true;return;}
             if(IsApplicationLocked){permittedLaunches.Remove(args.Game.Id);args.CancelStartup=true;if(applicationLock!=null)applicationLock.Enforce();return;}
             if(repository==null)return;
+            SettleSession(args.Game.Id);
             Mapping mapping;if(!repository.Snapshot().Mappings.TryGetValue(args.Game.Id.ToString(),out mapping))return;
             if(repository.Snapshot().Active.ContainsKey(args.Game.Id.ToString()))
             {args.CancelStartup=true;NotifyError(new InvalidOperationException("Recover the unfinished session before launching again."));return;}
@@ -287,14 +290,41 @@ namespace PlaytimeRclone
                 // The durable session is authoritative, including after a callback
                 // ordering change. A volatile in-memory set must not discard it.
                 if (!repository.Snapshot().Active.ContainsKey(args.Game.Id.ToString())) return;
-                if (repository.Stop(args.Game.Id.ToString(), args.ElapsedSeconds))
+                var game = args.Game; var elapsed = args.ElapsedSeconds;
+                settlingSessions[game.Id] = () => FinishSession(game, elapsed);
+                FinishSessionAfterAddons(game.Id);
+            }
+            catch (Exception ex) { NotifyError(ex); }
+        }
+        private async void FinishSessionAfterAddons(Guid id)
+        {
+            // Add-ons can correct playtime from their own stop callbacks, so wait for them
+            // before measuring. The session stays durable as unfinished until it is recorded.
+            await Task.Delay(SessionSettleMilliseconds);
+            SettleSession(id);
+        }
+        private void SettleSession(Guid id)
+        {
+            Action finish;
+            if (!settlingSessions.TryGetValue(id, out finish)) return;
+            settlingSessions.Remove(id);
+            finish();
+        }
+        private void FinishSession(Game game, ulong elapsed)
+        {
+            try
+            {
+                var current = PlayniteApi.Database.Games.Get(game.Id) ?? game;
+                var observed = current.Playtime;
+                if (repository != null && repository.Stop(game.Id.ToString(), elapsed, observed))
                 {
-                    live.Remove(args.Game.Id.ToString());
-                    logger.Info("Playnite Link recorded session: " + args.ElapsedSeconds + " seconds.");
+                    live.Remove(game.Id.ToString());
+                    logger.Info("Playnite Link recorded session: " + elapsed + " elapsed seconds.");
+                    if (closing) return;
                     // Playnite/add-ons may still hold their stop-event locks here.
                     // Projection runs on the UI dispatcher after native processing,
                     // never from inside the native game-stop callback.
-                    BackupThenSync(args.Game);
+                    BackupThenSync(current);
                     RetryActivityAfterStop();
                 }
             }
@@ -355,6 +385,7 @@ namespace PlaytimeRclone
         public override void OnApplicationStopped(OnApplicationStoppedEventArgs args)
         {
             closing = true; if (timer != null) timer.Dispose();
+            foreach (var id in settlingSessions.Keys.ToArray()) SettleSession(id);
             StopAchievementChanges();
             AchievementEvent(engine=>engine.OnApplicationStopped(args));
             if(applicationLock!=null)applicationLock.Dispose();

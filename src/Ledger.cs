@@ -100,6 +100,7 @@ namespace PlaytimeRclone
     {
         public string Id;
         public string StartedUtc;
+        public ulong? Playtime;
     }
     public sealed class Enrollment
     {
@@ -228,7 +229,7 @@ namespace PlaytimeRclone
                 var map = next.Mappings[local];
                 if (observed.HasValue && map.Intended.HasValue && observed.Value == map.Intended.Value)
                 { map.Expected = observed.Value; map.Intended = null; }
-                next.Active.Add(local, new Active { Id = Guid.NewGuid().ToString("N"), StartedUtc = DateTimeOffset.UtcNow.ToString("O") });
+                next.Active.Add(local, new Active { Id = Guid.NewGuid().ToString("N"), StartedUtc = DateTimeOffset.UtcNow.ToString("O"), Playtime = observed });
                 Commit(next); return true;
             }
         }
@@ -244,12 +245,16 @@ namespace PlaytimeRclone
                 Commit(next);
             }
         }
-        public bool Stop(string local, ulong seconds)
+        public bool Stop(string local, ulong seconds, ulong? observed = null)
         {
             lock (Gate)
             {
                 if (!state.Active.ContainsKey(local)) return false; // duplicate callback
                 var next = Clone(); var active = next.Active[local]; var map = next.Mappings[local];
+                // Another add-on may have corrected the session, such as removing suspended
+                // time. Follow a lower value, but never count more than the elapsed session.
+                if (observed.HasValue && active.Playtime.HasValue)
+                    seconds = Math.Min(seconds, observed.Value > active.Playtime.Value ? observed.Value - active.Playtime.Value : 0UL);
                 var now = DateTimeOffset.UtcNow;
                 var start = DateTimeOffset.Parse(active.StartedUtc);
                 next.Entries.Add(new Entry { Kind = "session", Id = active.Id, Game = map.Key, Device = next.Device,
