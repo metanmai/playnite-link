@@ -12,6 +12,17 @@ namespace PlaytimeRclone
         // binary is trusted, and archive paths never determine an output path.
         public const string Version="1.75.2";
         private static readonly object gate=new object();
+        public static string FindInstalled(string searchPath)
+        {
+            foreach(var entry in (searchPath??"").Split(Path.PathSeparator))
+            {
+                var folder=entry.Trim().Trim('"');
+                if(folder.Length==0||folder.IndexOfAny(Path.GetInvalidPathChars())>=0||!Path.IsPathRooted(folder))continue;
+                var exe=Path.Combine(folder,"rclone.exe");
+                if(File.Exists(exe))return exe;
+            }
+            return null;
+        }
         public static string Ensure(string directory)
         {
             lock(gate)

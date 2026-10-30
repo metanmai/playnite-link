@@ -57,7 +57,7 @@ namespace PlaytimeRclone
             if(String.IsNullOrWhiteSpace(exe)||!File.Exists(exe))
             {
                 status="Preparing verified cloud connection tools in the background…";
-                try{exe=await Task.Run(()=>RcloneRuntime.Ensure(Root));config.RcloneExe=exe;}
+                try{exe=RcloneRuntime.FindInstalled(Environment.GetEnvironmentVariable("PATH"))??await Task.Run(()=>RcloneRuntime.Ensure(Root));config.RcloneExe=exe;}
                 catch(Exception ex){NotifyError(ex);return;}
             }
             var window=Window("Connect your storage",680,560);var panel=Page(window,"Connect your storage","Select your own cloud connection. Games from supported library providers are linked automatically; GameActivity and HowLongToBeat are detected automatically.");
