@@ -97,7 +97,9 @@ internal static class Tests
         Test("remapping an enrolled game blocked", () => { using(var r=Enrolled()){Throws(()=>r.Enroll("game","manual:other",100,100));} });
         Test("start-stop exact elapsed and duplicate stop ignored", () => { using(var r=Enrolled()){r.Start("game");Equal(true,r.Stop("game",30));Equal(false,r.Stop("game",30));Equal(130UL,Total(r));} });
         Test("unenrolled games ignored", () => { using(var r=Enrolled()){Equal(false,r.Start("unknown"));Equal(false,r.Stop("unknown",30));Equal(100UL,Total(r));} });
-        Test("unfinished session prevents accidental new session", () => { using(var r=Enrolled()){r.Start("game");Throws(()=>r.Start("game"));Equal(100UL,Total(r));} });
+        Test("abandoned session adds no time and allows the next session", () => { using(var r=Enrolled()){r.Start("game");Equal(true,r.Abandon("game"));Equal(100UL,Total(r));Equal(0,r.Snapshot().Active.Count);Equal(0,r.Snapshot().Entries.Count(e=>e.Kind=="session"));Equal(true,r.Start("game"));Equal(true,r.Stop("game",20));Equal(120UL,Total(r));} });
+        Test("abandoning without an open session changes nothing", () => { using(var r=Enrolled()){Equal(false,r.Abandon("game"));Equal(false,r.Abandon("unknown"));Equal(100UL,Total(r));} });
+        Test("unfinished session prevents accidental new session",() => { using(var r=Enrolled()){r.Start("game");Throws(()=>r.Start("game"));Equal(100UL,Total(r));} });
         Test("simultaneous games keep distinct tokens", () => { using(var r=Enrolled()){r.Enroll("other","manual:other",0,0);r.Start("game");r.Start("other");r.Stop("other",70);r.Stop("game",5);Equal(105UL,Total(r));} });
         Test("restart retains offline sessions and device identity", () => {
             var d=NewDir();string device;using(var r=new Repository(d)){r.Enroll("game","manual:dispatch",100,100);r.Start("game");r.Stop("game",10);device=r.Snapshot().Device;}

@@ -284,6 +284,14 @@ namespace PlaytimeRclone
                 var next = Clone(); next.Mappings[local].Expected = observed; next.Mappings[local].Intended = null; Commit(next);
             }
         }
+        public bool Abandon(string local)
+        {
+            lock (Gate)
+            {
+                if (!state.Active.ContainsKey(local)) return false;
+                var next = Clone(); next.Active.Remove(local); Commit(next); return true;
+            }
+        }
         public void Unenroll(string local)
         {
             lock (Gate)

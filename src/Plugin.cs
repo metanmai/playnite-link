@@ -265,8 +265,10 @@ namespace PlaytimeRclone
             if(IsApplicationLocked){permittedLaunches.Remove(args.Game.Id);args.CancelStartup=true;if(applicationLock!=null)applicationLock.Enforce();return;}
             if(repository==null)return;
             Mapping mapping;if(!repository.Snapshot().Mappings.TryGetValue(args.Game.Id.ToString(),out mapping))return;
-            if(repository.Snapshot().Active.ContainsKey(args.Game.Id.ToString()))
-            {args.CancelStartup=true;NotifyError(new InvalidOperationException("Recover the unfinished session before launching again."));return;}
+            // Only an interrupted session can still be open here. Its length is unknown and
+            // Playnite did not record it either, so close it rather than block the game.
+            try{if(repository.Abandon(args.Game.Id.ToString()))PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Interrupted."+args.Game.Id,args.Game.Name+": an interrupted play session was not counted because its length is unknown.",NotificationType.Info));}
+            catch(Exception ex){NotifyError(ex);}
             if(restoringSaves.Contains(args.Game.Id)){args.CancelStartup=true;LaunchAfterRestore(args.Game);return;}
             try{SaveLink saveLink;if(vault.State.Links.TryGetValue(mapping.Key,out saveLink)&&saveLink.HasSaves)Plan(args.Game,mapping.Key).Recover();}
             catch(Exception ex){args.CancelStartup=true;NotifyError(ex);return;}
