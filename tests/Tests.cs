@@ -97,7 +97,8 @@ internal static class Tests
         Test("remapping an enrolled game blocked", () => { using(var r=Enrolled()){Throws(()=>r.Enroll("game","manual:other",100,100));} });
         Test("start-stop exact elapsed and duplicate stop ignored", () => { using(var r=Enrolled()){r.Start("game");Equal(true,r.Stop("game",30));Equal(false,r.Stop("game",30));Equal(130UL,Total(r));} });
         Test("unenrolled games ignored", () => { using(var r=Enrolled()){Equal(false,r.Start("unknown"));Equal(false,r.Stop("unknown",30));Equal(100UL,Total(r));} });
-        Test("unfinished session prevents accidental new session", () => { using(var r=Enrolled()){r.Start("game");Throws(()=>r.Start("game"));Equal(100UL,Total(r));} });
+        Test("upload time limit grows with the batch and stays capped", () => { Equal(105,RcloneTransport.UploadLimit(105,0));Equal(105,RcloneTransport.UploadLimit(105,50));Equal(2200,RcloneTransport.UploadLimit(105,2200));Equal(86400,RcloneTransport.UploadLimit(105,500000));Equal(90000,RcloneTransport.UploadLimit(90000,5)); });
+        Test("unfinished session prevents accidental new session",() => { using(var r=Enrolled()){r.Start("game");Throws(()=>r.Start("game"));Equal(100UL,Total(r));} });
         Test("simultaneous games keep distinct tokens", () => { using(var r=Enrolled()){r.Enroll("other","manual:other",0,0);r.Start("game");r.Start("other");r.Stop("other",70);r.Stop("game",5);Equal(105UL,Total(r));} });
         Test("restart retains offline sessions and device identity", () => {
             var d=NewDir();string device;using(var r=new Repository(d)){r.Enroll("game","manual:dispatch",100,100);r.Start("game");r.Stop("game",10);device=r.Snapshot().Device;}
