@@ -32,6 +32,21 @@ internal static class VaultTests
         Test("second empty device restores cloud root",()=>{var v=New();var r=Rev("remote");v.Add(r);SortedDictionary<string,string> applied=null;var cp=new Checkpoint();Sync(v,new SortedDictionary<string,string>(),cp,null,d=>applied=d);Equal(r.ContentHash(),Revision.ContentHashOf(applied));});
         Test("remote-only descendant restores automatically",()=>{var v=New();var a=Rev("a");var b=Rev("b",a.Hash());v.Add(a);v.Add(b);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};string value=null;Sync(v,a.Data,cp,null,d=>value=Revision.ContentHashOf(d));Equal(b.ContentHash(),value);Equal(b.Hash(),cp.Revision);});
         Test("local-only edit publishes child",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};Sync(v,Data("b"),cp);Equal(a.Hash(),v.Heads(game,"save")[0].Parents.Single());});
+        Test("automatic publication leaves a newer cloud save for the next launch",()=>{
+            var vault=New();
+            var original=Rev("local");
+            var newer=Rev("remote",original.Hash());
+            vault.Add(original);vault.Add(newer);
+            var checkpoint=new Checkpoint{Revision=original.Hash(),Content=original.ContentHash()};
+            var deferred=vault.Reconcile(game,"save",device,original.Data,checkpoint,c=>"cancel",data=>{throw new Exception("Exit applied cloud data");},allowRemoteApply:false);
+            True(deferred.Deferred&&!deferred.Cancelled);
+            Equal(original.Hash(),checkpoint.Revision);
+            Equal(2,vault.Read(vault.Objects).Count);
+            var restored=false;
+            Sync(vault,original.Data,checkpoint,c=>"cancel",data=>restored=Revision.ContentHashOf(data)==newer.ContentHash());
+            True(restored);
+            Equal(newer.Hash(),checkpoint.Revision);
+        });
         Test("divergent edits invoke conflict chooser",()=>{var v=New();var a=Rev("a");var b=Rev("remote",a.Hash());v.Add(a);v.Add(b);var cp=new Checkpoint{Revision=a.Hash(),Content=a.ContentHash()};bool asked=false;Sync(v,Data("local"),cp,c=>{asked=true;return "cancel";});True(asked);Equal(a.Hash(),cp.Revision);});
         Test("cancel preserves files checkpoints and revision count",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint();bool applied=false;var outcome=Sync(v,Data("b"),cp,c=>"cancel",d=>applied=true);True(outcome.Cancelled);True(!applied);Equal(null,cp.Revision);Equal(1,v.Read(v.Objects).Count);});
         Test("explicit local resolution preserves remote history",()=>{var v=New();var a=Rev("a");v.Add(a);var cp=new Checkpoint();Sync(v,Data("b"),cp,c=>"local");Equal(2,v.Read(v.Objects).Count);Equal(a.Hash(),v.Heads(game,"save").Single().Parents.Single());});
@@ -67,13 +82,69 @@ internal static class VaultTests
         Test("same vault reconnect and restart preserves pin",()=>{var d=Dir();var v=new Vault(d);v.Pin("personal:Playnite/");v.Pin("personal:Playnite");Equal("personal:Playnite",new Vault(d).State.Remote);});
         Test("damaged local state fails without resetting",()=>{var d=Dir();File.WriteAllText(Path.Combine(d,"vault-state.json"),"null");Throws(()=>new Vault(d));Equal("null",File.ReadAllText(Path.Combine(d,"vault-state.json")));});
         Test("long revision chains validate without recursive stack growth",()=>{var v=New();string parent=null;for(int i=0;i<500;i++){var r=Rev(i.ToString(),parent==null?new string[0]:new[]{parent});v.Add(r);parent=r.Hash();}Equal(1,v.Heads(game,"save").Count);});
-        Test("Rclone account completion accepts an empty final State",()=>{int calls=0;CloudAccount.ConfigureProtocol(a=>{calls++;return "{\"State\":\"\"}";},"local.conf","personal","drive",q=>{throw new Exception("Should not ask");},(s,a)=>a());Equal(1,calls);});
-        Test("Rclone OAuth continuation passes state and selected value without a shell",()=>{int calls=0;CloudAccount.ConfigureProtocol(a=>{calls++;if(calls==1)return "{\"State\":\"choose-drive\",\"Option\":{\"Name\":\"driveid\",\"Help\":\"Choose drive\",\"Default\":\"x\",\"Required\":true}}";True(a.Contains("--continue"));Equal("choose-drive",a[a.IndexOf("--state")+1]);Equal("drive with spaces",a[a.IndexOf("--result")+1]);return "{\"State\":\"\"}";},"local.conf","personal","onedrive",q=>"drive with spaces",(s,a)=>a());Equal(2,calls);});
-        Test("cancelling cloud OAuth keeps configuration unselected",()=>Throws(()=>CloudAccount.ConfigureProtocol(a=>"{\"State\":\"pending\",\"Option\":{\"Name\":\"choice\"}}","local.conf","personal","drive",q=>null,(s,a)=>a())));
-        Test("provider secrets are marked for masked entry",()=>{bool secret=false;int calls=0;CloudAccount.ConfigureProtocol(a=>++calls==1?"{\"State\":\"pending\",\"Option\":{\"Name\":\"password\",\"IsPassword\":true}}":"{\"State\":\"\"}","local.conf","personal","drive",q=>{secret=q.Secret;return "dummy";},(s,a)=>a());True(secret);});
+        Test("Rclone account completion accepts an empty final State",()=>{int calls=0;CloudAccount.ConfigureProtocol("rclone.exe",(a,input)=>{calls++;return "{\"State\":\"\"}";},"local.conf","personal","drive",q=>{throw new Exception("Should not ask");},(s,a)=>a());Equal(1,calls);});
+        Test("Rclone OAuth continuation passes state and selected value without a shell",()=>{int calls=0;CloudAccount.ConfigureProtocol("rclone.exe",(a,input)=>{calls++;if(calls==1)return "{\"State\":\"choose-drive\",\"Option\":{\"Name\":\"driveid\",\"Help\":\"Choose drive\",\"Default\":\"x\",\"Required\":true}}";True(a.Arguments.Contains("--continue"));Equal("choose-drive",a.EnvironmentVariables["RCLONE_STATE"]);Equal("drive with spaces",a.EnvironmentVariables["RCLONE_RESULT"]);True(!a.Arguments.Contains("drive with spaces"));return "{\"State\":\"\"}";},"local.conf","personal","onedrive",q=>"drive with spaces",(s,a)=>a());Equal(2,calls);});
+        Test("cancelling cloud OAuth keeps configuration unselected",()=>Throws(()=>CloudAccount.ConfigureProtocol("rclone.exe",(a,input)=>"{\"State\":\"pending\",\"Option\":{\"Name\":\"choice\"}}","local.conf","personal","drive",q=>null,(s,a)=>a())));
+        Test("provider secrets are marked for masked entry",()=>{bool secret=false;int calls=0;CloudAccount.ConfigureProtocol("rclone.exe",(a,input)=>++calls==1?"{\"State\":\"pending\",\"Option\":{\"Name\":\"password\",\"IsPassword\":true}}":"{\"State\":\"\"}","local.conf","personal","drive",q=>{secret=q.Secret;return "dummy";},(s,a)=>a());True(secret);});
         if(exe!=null)
         {
             Test("valid configured personal remote passes settings validation",()=>{new SyncConfig{RcloneExe=exe,RemoteFolder="vault:personal",ConfigFile=""}.Validate();});
+            Test("vault guard blocks real Rclone pull, merge and push after a physical vault changes",()=>{
+                var cloudA=Dir();var cloudB=Dir();var cfg=Path.Combine(Dir(),"rclone.conf");
+                var config=new SyncConfig{RcloneExe=exe,ConfigFile=cfg,RemoteFolder="fixture:vault"};
+                Action<string> select=cloud=>File.WriteAllText(cfg,"[fixture]\ntype = alias\nremote = "+cloud.Replace('\\','/')+"\n");
+                select(cloudA);
+                var localRoot=Dir();var local=new Vault(localRoot);local.Add(Rev("local"));
+                var cache=Dir();
+                Action<Vault> sync=v=>{
+                    ConnectionProbe.VerifyVault(v,config);
+                    var transport=new RcloneTransport(exe,cfg,config.RemoteFolder,"playnite-link-v1/revisions/objects");
+                    transport.Pull(cache);v.Import(cache);transport.Push(v.Objects);
+                };
+                sync(local);
+                var markerA=Path.Combine(cloudA,"vault",".playnite-link-v1-vault-id");
+                True(File.Exists(markerA));True(local.State.ConnectionIdentity.StartsWith("marker:",StringComparison.Ordinal));
+                var identity=local.State.ConnectionIdentity;
+                select(cloudB);
+                var wrong=New();wrong.Add(Rev("wrong account"));
+                ConnectionProbe.VerifyVault(wrong,config);
+                var transportB=new RcloneTransport(exe,cfg,config.RemoteFolder,"playnite-link-v1/revisions/objects");
+                transportB.Push(wrong.Objects);
+                Throws(()=>sync(new Vault(localRoot)));
+                Equal(0,Directory.GetFiles(cache).Length);Equal(1,local.Read(local.Objects).Count);
+                Equal(1,Directory.GetFiles(Path.Combine(cloudB,"vault","playnite-link-v1","revisions","objects")).Length);
+                select(cloudA);
+                sync(new Vault(localRoot));
+                Equal(identity,new Vault(localRoot).State.ConnectionIdentity);
+                Equal(1,Directory.GetFiles(cache).Length);
+                VaultMaintenance.Purge(config);
+                ConnectionProbe.VerifyVault(new Vault(localRoot),config);
+                True(File.Exists(markerA));
+                Directory.Move(Path.Combine(cloudA,"vault"),Path.Combine(cloudA,"removed"));
+                Directory.CreateDirectory(Path.Combine(cloudA,"vault"));
+                Throws(()=>sync(new Vault(localRoot)));
+                True(!File.Exists(markerA));
+            });
+            Test("first vault creation handles a missing nested parent through real Rclone",()=>{
+                var cloud=Dir();var cfg=Path.Combine(Dir(),"rclone.conf");
+                File.WriteAllText(cfg,"[fixture]\ntype = alias\nremote = "+cloud.Replace('\\','/')+"\n");
+                var config=new SyncConfig{RcloneExe=exe,ConfigFile=cfg,RemoteFolder="fixture:first/vault"};
+                var pinned=New();pinned.PinVerified(config.RemoteFolder,Identity.Hash("legacy-directory-id"),null);
+                Throws(()=>ConnectionProbe.VerifyVault(pinned,config));
+                True(!Directory.Exists(Path.Combine(cloud,"first")));
+                var fresh=New();ConnectionProbe.VerifyVault(fresh,config);
+                True(File.Exists(Path.Combine(cloud,"first","vault",".playnite-link-v1-vault-id")));
+                ConnectionProbe.VerifyVault(fresh,config);
+            });
+            Test("legacy textual vault pin requires explicit confirmation and preserves local history",()=>{
+                var cloud=Dir();var cfg=Path.Combine(Dir(),"rclone.conf");File.WriteAllText(cfg,"[fixture]\ntype = alias\nremote = "+cloud.Replace('\\','/')+"\n");
+                var config=new SyncConfig{RcloneExe=exe,ConfigFile=cfg,RemoteFolder="fixture:"};
+                var v=New();v.Pin(config.RemoteFolder);v.Add(Rev("old profile"));
+                Throws(()=>ConnectionProbe.VerifyVault(v,config));True(!Directory.Exists(Path.Combine(cloud,"playnite-link-v1")));
+                ConnectionProbe.VerifyVault(v,config,confirmLegacy:true);
+                True(File.Exists(Path.Combine(cloud,".playnite-link-v1-vault-id")));Equal(1,v.Read(v.Objects).Count);
+                ConnectionProbe.VerifyVault(v,config);
+            });
             Test("real Rclone two dummy personal accounts are isolated",()=>{
                 var cloudA=Dir();var cloudB=Dir();var cfg=Path.Combine(Dir(),"rclone.conf");File.WriteAllText(cfg,"");
                 var a=New();Sync(a,Data("alice"),new Checkpoint());var ta=new RcloneTransport(exe,cfg,cloudA,"playnite-link-v1/revisions/objects");var tb=new RcloneTransport(exe,cfg,cloudB,"playnite-link-v1/revisions/objects");
@@ -92,12 +163,24 @@ internal static class VaultTests
                 t.Push(a.Objects);t.Push(a.Objects);incoming=Dir();t.Pull(incoming);b.Import(incoming);Sync(b,Data("handheld-offline"),cpB);Equal(1,b.Heads(game,"save").Count);Equal(cpA.Content,cpB.Content);Equal(4,b.Read(b.Objects).Count);
             });
         }
-        Test("personal Drive setup skips the technical Shared Drive prompt",()=>{int calls=0;CloudAccount.ConfigureProtocol(a=>{calls++;if(calls==1)return "{\"State\":\"team\",\"Option\":{\"Name\":\"config_change_team_drive\",\"Type\":\"bool\"}}";Equal("false",a[a.IndexOf("--result")+1]);return "{\"State\":\"\"}";},"local.conf","personal","drive",q=>{throw new Exception("Personal setup must not ask for technical boolean text");},(message,action)=>action());Equal(2,calls);});
-        Test("provider booleans and example choices have structured UI metadata",()=>{int calls=0;CloudAccount.ConfigureProtocol(a=>++calls==1?"{\"State\":\"choice\",\"Option\":{\"Name\":\"confirm\",\"Type\":\"bool\",\"Examples\":[{\"Value\":\"true\",\"Help\":\"Yes\"},{\"Value\":\"false\",\"Help\":\"No\"}]}}":"{\"State\":\"\"}","local.conf","personal","onedrive",q=>{True(q.Boolean);Equal(2,q.Choices.Count);Equal("No",q.Choices[1].Label);return "false";},(message,action)=>action());});
+        Test("personal Drive setup skips the technical Shared Drive prompt",()=>{int calls=0;CloudAccount.ConfigureProtocol("rclone.exe",(a,input)=>{calls++;if(calls==1)return "{\"State\":\"team\",\"Option\":{\"Name\":\"config_change_team_drive\",\"Type\":\"bool\"}}";Equal("false",a.EnvironmentVariables["RCLONE_RESULT"]);return "{\"State\":\"\"}";},"local.conf","personal","drive",q=>{throw new Exception("Personal setup must not ask for technical boolean text");},(message,action)=>action());Equal(2,calls);});
+        Test("provider booleans and example choices have structured UI metadata",()=>{int calls=0;CloudAccount.ConfigureProtocol("rclone.exe",(a,input)=>++calls==1?"{\"State\":\"choice\",\"Option\":{\"Name\":\"confirm\",\"Type\":\"bool\",\"Examples\":[{\"Value\":\"true\",\"Help\":\"Yes\"},{\"Value\":\"false\",\"Help\":\"No\"}]}}":"{\"State\":\"\"}","local.conf","personal","onedrive",q=>{True(q.Boolean);Equal(2,q.Choices.Count);Equal("No",q.Choices[1].Label);return "false";},(message,action)=>action());});
         Test("a new local alias can reconnect only with matching physical vault identity",()=>{var v=New();v.Pin("old:PlayniteLink");Throws(()=>v.PinVerified("personal:PlayniteLink","folder-a",null));Equal("old:PlayniteLink",v.State.Remote);v.PinVerified("personal:PlayniteLink","folder-a","folder-a");Equal("personal:PlayniteLink",v.State.Remote);Equal("folder-a",v.State.ConnectionIdentity);});
         Test("changing account with the same remote name cannot bypass the vault pin",()=>{var dir=Dir();var v=new Vault(dir);v.PinVerified("personal:PlayniteLink","folder-a",null);Throws(()=>v.PinVerified("personal:PlayniteLink","folder-b","folder-a"));Equal("folder-a",new Vault(dir).State.ConnectionIdentity);Equal("personal:PlayniteLink",v.State.Remote);});
         Test("reconnect proof and original vault identity survive restart",()=>{var dir=Dir();var v=new Vault(dir);v.PinVerified("old:PlayniteLink","folder-a",null);var reloaded=new Vault(dir);reloaded.PinVerified("new:PlayniteLink","folder-a",null);Equal("new:PlayniteLink",new Vault(dir).State.Remote);Throws(()=>reloaded.PinVerified("other:PlayniteLink","folder-b","folder-b"));});
         Test("connection test identifies the exact folder and rejects ambiguous duplicates",()=>{var folders=Newtonsoft.Json.Linq.JArray.Parse("[{\"Name\":\"PlayniteLink\",\"IsDir\":true,\"ID\":\"unique-folder\"},{\"Name\":\"Other\",\"IsDir\":true,\"ID\":\"other\"}]");var result=ConnectionProbe.ParseFolders(folders,"PlayniteLink");True(result.FolderExists);True(!String.IsNullOrWhiteSpace(result.Identity));True(!ConnectionProbe.ParseFolders(folders,"NewVault").FolderExists);folders.Add(folders[0].DeepClone());Throws(()=>ConnectionProbe.ParseFolders(folders,"PlayniteLink"));});
+        Test("game and kind head queries share a validated graph and invalidate on mutations",()=>{
+            var v=New();var games=Enumerable.Range(0,120).Select(i=>Identity.Hash("fixture-"+i)).ToArray();
+            foreach(var key in games){var revision=Rev(key);revision.Game=key;v.Add(revision);}
+            foreach(var key in games){Equal(1,v.Heads(key,"save").Count);Equal(0,v.Heads(key,"preferences").Count);}
+            Equal(1L,v.GraphBuildCount);
+            var original=v.Heads(games[0],"save").Single();var parent=original.Hash();original.Parents.Add(new string('a',64));
+            Equal(parent,v.Heads(games[0],"save").Single().Hash());
+            var other=New();var child=Rev("child",parent);child.Game=games[0];other.Add(child);
+            v.Import(other.Objects);Equal(child.Hash(),v.Heads(games[0],"save").Single().Hash());Equal(2L,v.GraphBuildCount);
+            v.Import(other.Objects);Equal(2L,v.GraphBuildCount);
+            Console.WriteLine("240 head queries used one graph validation.");
+        });
         Console.WriteLine("RESULT "+passed+" passed, "+failed+" failed");Environment.ExitCode=failed==0?0:1;
     }
 }

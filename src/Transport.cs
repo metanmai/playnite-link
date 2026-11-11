@@ -49,12 +49,12 @@ namespace PlaytimeRclone
             }
             return result.Append('\\', slashes * 2).Append('"').ToString();
         }
-        private void Copy(string source, string destination, bool upload,string fileList=null,string[] metadata=null)
+        private void Copy(string source, string destination, bool upload,string fileList=null,string[] metadata=null,MetadataValidationCache validation=null)
         {
             if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");
             var metadataDownload=!upload&&metadata!=null;
-            if(metadataDownload)MetadataCache.Validate(destination);
-            var initial=metadataDownload?MetadataCache.Count(destination):0;
+            if(metadataDownload)MetadataCache.Validate(destination,metadata,validation);
+            var initial=metadataDownload?MetadataCache.Count(destination,metadata):0;
             var args = new List<string> { "copy", source, destination, "--immutable",
                 "--retries", metadataDownload?"1":"3", "--low-level-retries", metadataDownload?"2":"4", "--retries-sleep", metadataDownload?"1s":"10s", "--tpslimit", metadataDownload?"8":"4", "--tpslimit-burst", metadataDownload?"8":"4", "--contimeout", metadataDownload?"5s":"10s", "--timeout", metadataDownload?"15s":"60s", "--stats", "0", "--log-level", "ERROR" };
             if(metadataDownload){args.Add("--fast-list");args.Add("--ignore-existing");}
@@ -75,7 +75,7 @@ namespace PlaytimeRclone
                 while(!process.WaitForExit(250))
                 {
                     if(cancelled!=null&&cancelled()){stopped=true;break;}
-                    if(metadataDownload){if(watch.Elapsed.TotalSeconds>=nextProgress){cached=MetadataCache.Count(destination);if(progress!=null)progress(new MetadataTransferProgress{Cached=cached,Downloaded=Math.Max(0,cached-initial),ElapsedSeconds=watch.Elapsed.TotalSeconds});interrupted=guard.Observe(watch.Elapsed.TotalSeconds,cached);nextProgress=watch.Elapsed.TotalSeconds+2;}if(interrupted!=null)break;}
+                    if(metadataDownload){if(watch.Elapsed.TotalSeconds>=nextProgress){cached=MetadataCache.Count(destination,metadata);if(progress!=null)progress(new MetadataTransferProgress{Cached=cached,Downloaded=Math.Max(0,cached-initial),ElapsedSeconds=watch.Elapsed.TotalSeconds});interrupted=guard.Observe(watch.Elapsed.TotalSeconds,cached);nextProgress=watch.Elapsed.TotalSeconds+5;}if(interrupted!=null)break;}
                     else if(watch.Elapsed.TotalSeconds>limitSeconds){interrupted="The cloud transfer stopped responding. Local changes remain queued.";break;}
                 }
                 if(stopped||interrupted!=null){process.Kill();process.WaitForExit();System.Threading.Tasks.Task.WaitAll(stdout,stderr);if(FailureDiagnostic!=null)FailureDiagnostic(stderr.Result);if(stopped)throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");throw new CloudTransferException(interrupted);}
@@ -93,8 +93,8 @@ namespace PlaytimeRclone
             }
         }
         public void Pull(string destination) { Copy(root, destination, false); }
-        public void PullMetadata(string destination)
-        {Copy(root,destination,false,null,MetadataCache.Areas);if(progress!=null)progress(new MetadataTransferProgress{Cached=MetadataCache.Count(destination)}); }
+        public void PullMetadata(string destination,string[] areas=null,MetadataValidationCache validation=null)
+        {Copy(root,destination,false,null,areas??MetadataCache.Areas,validation);if(progress!=null)progress(new MetadataTransferProgress{Cached=MetadataCache.Count(destination,areas)}); }
         public void Push(string source) { Copy(source, root, true); }
         public void PullFiles(string destination,IEnumerable<string> names)
         {
@@ -102,6 +102,46 @@ namespace PlaytimeRclone
             if(list.Any(n=>!Regex.IsMatch(n,"^[a-f0-9]{64}\\.blob$")))throw new InvalidDataException("Unsafe blob transfer path.");
             Directory.CreateDirectory(destination);var path=Path.Combine(destination,Guid.NewGuid().ToString("N")+".files.tmp");
             try{File.WriteAllLines(path,list,new UTF8Encoding(false));Copy(root,destination,false,path);}finally{if(File.Exists(path))File.Delete(path);}
+        }
+        // Achievement customization references are untrusted size claims.
+        // Stream one extra byte to detect under-reported lengths and bound
+        // the download itself before any bytes enter the persistent cache.
+        public void FetchBoundedBlob(BlobReference reference,Stream destination)
+        {
+            if(reference.Length<0||reference.Length==Int64.MaxValue||!Regex.IsMatch(reference.Hash??"",@"\A[a-f0-9]{64}\z"))
+                throw new InvalidDataException("Invalid bounded blob reference.");
+            if(cancelled!=null&&cancelled())throw new OperationCanceledException();
+            var length=(reference.Length+1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var args=new List<string>{"cat",root+"/"+reference.Hash+".blob","--head",length,"--retries","1","--low-level-retries","2","--contimeout","5s","--timeout","15s","--log-level","ERROR"};
+            if(config.Length>0){args.Add("--config");args.Add(config);}
+            if(bandwidthKiB>0){args.Add("--bwlimit");args.Add(bandwidthKiB.ToString(System.Globalization.CultureInfo.InvariantCulture)+"k");}
+            var info=new ProcessStartInfo(exe,String.Join(" ",args.Select(Quote))){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+            using(var process=Process.Start(info))
+            {
+                var input=process.StandardOutput.BaseStream;
+                var copy=System.Threading.Tasks.Task.Run(()=>BlobStore.CopyBounded(input,destination,reference.Length,cancelled));
+                var errors=process.StandardError.ReadToEndAsync();
+                var watch=Stopwatch.StartNew();
+                try
+                {
+                    while(!process.WaitForExit(100))
+                    {
+                        if(cancelled!=null&&cancelled())throw new OperationCanceledException();
+                        if(copy.IsFaulted)copy.GetAwaiter().GetResult();
+                        if(watch.Elapsed.TotalSeconds>limitSeconds)throw new CloudTransferException("Achievement customization download timed out.");
+                    }
+                    var bytes=copy.GetAwaiter().GetResult();
+                    if(process.ExitCode!=0||bytes!=reference.Length)throw new InvalidDataException("Missing or truncated achievement customization blob.");
+                }
+                finally
+                {
+                    if(!process.HasExited)try{process.Kill();}catch(InvalidOperationException){}
+                    process.WaitForExit();
+                    // Let the reader finish before the caller closes its output.
+                    try{copy.GetAwaiter().GetResult();}catch(Exception){}
+                    errors.GetAwaiter().GetResult();
+                }
+            }
         }
         public void PushFiles(string source,IEnumerable<string> names)
         {
@@ -137,7 +177,7 @@ namespace PlaytimeRclone
             }
             return new Ledger(records).Entries;
         }
-        public void Run(Repository repository, ITransport transport, string scratch, string cache = null,bool activity=false,bool pull=true)
+        public void Run(Repository repository, ITransport transport, string scratch, string cache = null,bool activity=false,bool pull=true,ISet<string> games=null)
         {
             var run = Path.Combine(scratch, Guid.NewGuid().ToString("N").Substring(0, 12));
             var incoming = cache ?? Path.Combine(run, "i"); var outgoing = Path.Combine(run, "o");
@@ -145,8 +185,9 @@ namespace PlaytimeRclone
             try
             {
                 if(pull)transport.Pull(incoming);
-                repository.Merge(ReadObjects(incoming));
+                repository.Merge(ReadObjects(incoming).Where(entry=>games==null||games.Contains(entry.Game)));
                 foreach (var entry in repository.Snapshot().Entries)
+                    if(games==null||games.Contains(entry.Game))
                     if(activity?(entry.Kind=="history"||entry.Count.HasValue):(entry.Kind!="history"&&!entry.Count.HasValue))
                     if(!File.Exists(Path.Combine(incoming,entry.Hash()+".json")))
                         File.WriteAllText(Path.Combine(outgoing, entry.Hash() + ".json"), entry.Canonical(), new UTF8Encoding(false));

@@ -31,14 +31,15 @@ namespace PlaytimeRclone
                 if(setupStatusText!=null)setupStatusText.Text=setupStatus;
                 if(activityStatusText!=null)activityStatusText.Text=activityStatus;
             };
-            window.Closed+=(_,e)=>{updates.Stop();accountPages.Clear();accountWindow=null;accountSection=null;overviewStatus=null;overviewHeading=null;overviewSync=null;overviewStop=null;};
+            window.Closed+=(_,e)=>{updates.Stop();accountPages.Clear();accountWindow=null;accountSection=null;overviewStatus=null;overviewHeading=null;overviewSync=null;overviewStop=null;activityStatusText=null;};
             ShowAccountPage(section);updates.Start();window.ShowDialog();
         }
         private void ShowAccountPage(string section)
         {
             object page;
-            if(accountPages.TryGetValue(section,out page)){accountWindow.Content=page;accountSection=section;return;}
+            if(section!="Sync settings"&&accountPages.TryGetValue(section,out page)){accountWindow.Content=page;accountSection=section;return;}
             if(section=="Overview")BuildOverview(accountWindow);
+            else if(section=="Sync settings")BuildSyncSettings(accountWindow);
             else if(section=="Devices")BuildDevices(accountWindow);
             else if(section=="Protection")BuildProtection(accountWindow);
             else BuildSetup(accountWindow);
@@ -79,7 +80,7 @@ namespace PlaytimeRclone
                     System.Threading.Interlocked.Exchange(ref syncing,1);
                     var captured=config;
                     if(String.IsNullOrWhiteSpace(captured.RemoteFolder))throw new InvalidOperationException("Connect cloud storage from Overview first.");
-                    CheckActiveGameVault(captured);
+                    CheckActiveGameVault(captured,()=>closing||vaultSwitchPending||generation!=System.Threading.Volatile.Read(ref transferGeneration));
                     var cache=System.IO.Path.Combine(Root,"cloud-cache","metadata","devices","objects");System.IO.Directory.CreateDirectory(cache);
                     new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/devices/objects",cancelled:()=>closing||vaultSwitchPending||generation!=System.Threading.Volatile.Read(ref transferGeneration)).Pull(cache);
                     if(closing||generation!=System.Threading.Volatile.Read(ref transferGeneration))throw new OperationCanceledException();

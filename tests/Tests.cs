@@ -103,6 +103,45 @@ internal static class Tests
             var d=NewDir();string device;using(var r=new Repository(d)){r.Enroll("game","manual:dispatch",100,100);r.Start("game");r.Stop("game",10);device=r.Snapshot().Device;}
             using(var r=new Repository(d)){Equal(device,r.Snapshot().Device);Equal(110UL,Total(r));}
         });
+        Test("a stopped game's retry survives restart and an older cycle cannot clear newer work",()=>{
+            var folder=NewDir();
+            using(var repo=new Repository(folder))
+            {
+                repo.Enroll("game","manual:dispatch",100,100);
+                repo.Enroll("other","manual:other",0,0);
+                repo.Start("game");
+                Equal(0,repo.PendingGameSyncs().Count);
+                Equal(true,repo.Stop("game",20,queueGameSync:true));
+            }
+            using(var repo=new Repository(folder))
+            {
+                var first=repo.PendingGameSyncs();
+                Equal("game",first.Keys.Single());
+                Equal(120UL,Total(repo));
+                repo.QueueGameSync("game");
+                repo.CompleteGameSyncs(first);
+                Equal("game",repo.PendingGameSyncs().Keys.Single());
+                repo.CompleteGameSyncs(repo.PendingGameSyncs());
+                Equal(0,repo.PendingGameSyncs().Count);
+            }
+        });
+        Test("a scoped ledger transfer merges and publishes only the requested game",()=>{
+            var transport=new FolderTransport();
+            using(var repo=Enrolled())
+            {
+                repo.Enroll("other","manual:other",0,0);
+                var other=Identity.Hash("manual:other");
+                var remote=E(30);remote.Game=other;
+                File.WriteAllText(Path.Combine(transport.Root,remote.Hash()+".json"),remote.Canonical());
+                new SyncEngine().Run(repo,transport,NewDir(),games:new HashSet<string>{key});
+                Equal(false,repo.Snapshot().Entries.Any(entry=>entry.Id==remote.Id));
+                Equal(1,SyncEngine.ReadObjects(transport.Root).Count(entry=>entry.Game==other));
+                Equal(1,SyncEngine.ReadObjects(transport.Root).Count(entry=>entry.Game==key));
+                Sync(repo,transport);
+                Equal(true,repo.Snapshot().Entries.Any(entry=>entry.Id==remote.Id));
+                Equal(2,SyncEngine.ReadObjects(transport.Root).Count(entry=>entry.Game==other));
+            }
+        });
         Test("pending crash session retained without guessed duration", () => { var d=NewDir();using(var r=new Repository(d)){r.Enroll("game","manual:dispatch",100,100);r.Start("game");} using(var r=new Repository(d)){Equal(1,r.Snapshot().Active.Count);Equal(100UL,Total(r));} });
         Test("one writer per local profile", () => { var d=NewDir();using(var r=new Repository(d)){Throws(()=>{using(var other=new Repository(d)){};});} });
         Test("corrupted local state fails without reset", () => { var d=NewDir();File.WriteAllText(Path.Combine(d,"state.json"),"garbage");Throws(()=>new Repository(d));Equal("garbage",File.ReadAllText(Path.Combine(d,"state.json"))); });
@@ -111,6 +150,22 @@ internal static class Tests
             var d=NewDir();using(var r=new Repository(d)){r.Enroll("game","manual:dispatch",100,100);var file=Path.Combine(d,"state.json");File.SetAttributes(file,FileAttributes.ReadOnly);try{Throws(()=>r.Start("game"));Equal(0,r.Snapshot().Active.Count);}finally{File.SetAttributes(file,FileAttributes.Normal);}}
         });
         Test("projection uses exact session seconds without double counting", () => { using(var r=Enrolled()){r.Start("game");r.Stop("game",12);ulong displayed=112;r.AcceptProjection("game",displayed,v=>displayed=v);Equal(112UL,displayed);} });
+        Test("unchanged projection reads all mapped games without extra ledger validation or journal writes",()=>{
+            var path=NewDir();
+            using(var repo=new Repository(path))
+            {
+                repo.EnrollBatch(Enumerable.Range(0,160).Select(i=>new Enrollment{Local="game-"+i,Source="manual:projection-"+i,Original=100,Baseline=100,Count=2}));
+                var validated=repo.LedgerValidationCount;var state=Path.Combine(path,"state.json");var timestamp=File.GetLastWriteTimeUtc(state);
+                for(int pass=0;pass<2;pass++)foreach(var mapping in repo.ProjectionMappings())
+                {
+                    repo.EnsureBaselineCount(mapping.Key,2);
+                    repo.AcceptProjection(mapping.Key,100,_=>{throw new Exception("Unchanged Playnite total was written.");});
+                    var result=repo.ReadProjection(mapping.Key);Equal(100UL,result.Total);Equal(2UL,result.Count);Equal<DateTime?>(null,result.LastActivityUtc);
+                }
+                Equal(validated,repo.LedgerValidationCount);Equal(timestamp,File.GetLastWriteTimeUtc(state));
+                Console.WriteLine("320 unchanged projections caused zero extra ledger validations or state writes.");
+            }
+        });
         Test("projection skips an active game", () => { using(var r=Enrolled()){r.Start("game");r.AcceptProjection("game",100,_=>{throw new Exception("must not write");});} });
         Test("outside playtime edit is surfaced", () => { using(var r=Enrolled()){Throws(()=>r.AcceptProjection("game",999,_=>{}));Equal(100UL,Total(r));} });
         Test("projection crash after DB write recovers idempotently", () => {

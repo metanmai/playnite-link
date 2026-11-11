@@ -57,9 +57,19 @@ namespace PlaytimeRclone
             return "manual:" + key;
         }
     }
+    public sealed class PlaytimeProjection
+    {
+        internal ulong BaselineSeconds,BaselineCount,HistorySeconds,HistoryCount,SessionSeconds,NativeCount;
+        internal bool HasBaselineCount;
+        public ulong Total {get{return checked(Math.Max(BaselineSeconds,HistorySeconds)+SessionSeconds);}}
+        public ulong Count {get{return checked(Math.Max(BaselineCount,HistoryCount)+NativeCount);}}
+        public DateTime? LastActivityUtc {get;internal set;}
+    }
     public sealed class Ledger
     {
         private readonly Dictionary<string, Entry> items = new Dictionary<string, Entry>();
+        private readonly Lazy<Dictionary<string,PlaytimeProjection>> projection;
+        private static readonly PlaytimeProjection Empty=new PlaytimeProjection();
         public Ledger(IEnumerable<Entry> entries)
         {
             foreach (var entry in entries)
@@ -70,23 +80,38 @@ namespace PlaytimeRclone
                     throw new InvalidDataException("Conflicting content for session/baseline " + entry.Id + ". Sync stopped; inspect both records.");
                 items[entry.Id] = entry;
             }
+            projection=new Lazy<Dictionary<string,PlaytimeProjection>>(BuildProjection);
         }
         public List<Entry> Entries { get { return items.Values.OrderBy(x => x.Id, StringComparer.Ordinal).ToList(); } }
-        public ulong Total(string game)
+        internal void PrepareProjection(){var view=projection.Value;}
+        private Dictionary<string,PlaytimeProjection> BuildProjection()
         {
-            var records = items.Values.Where(x => x.Game == game).ToList();
-            ulong baseline = records.Where(x => x.Kind == "baseline").Select(x => x.Seconds).DefaultIfEmpty(0UL).Max();
-            ulong history=0;checked{foreach(var entry in records.Where(x=>x.Kind=="history"))history+=entry.Seconds;}
-            baseline=Math.Max(baseline,history);
-            checked { foreach (var entry in records.Where(x => x.Kind == "session")) baseline += entry.Seconds; }
-            return baseline;
+            var result=new Dictionary<string,PlaytimeProjection>(StringComparer.Ordinal);
+            foreach(var item in items.Values)
+            {
+                PlaytimeProjection game;
+                if(!result.TryGetValue(item.Game,out game)){game=new PlaytimeProjection();result.Add(item.Game,game);}
+                if(item.Kind=="baseline")
+                {
+                    game.BaselineSeconds=Math.Max(game.BaselineSeconds,item.Seconds);
+                    game.BaselineCount=Math.Max(game.BaselineCount,item.Count??0UL);
+                    game.HasBaselineCount|=item.Count.HasValue;
+                    continue;
+                }
+                if(item.Kind=="history"){game.HistorySeconds=checked(game.HistorySeconds+item.Seconds);game.HistoryCount++;}
+                else{game.SessionSeconds=checked(game.SessionSeconds+item.Seconds);game.NativeCount++;}
+                var started=DateTimeOffset.Parse(item.StartedUtc).UtcDateTime;
+                if(!game.LastActivityUtc.HasValue||game.LastActivityUtc.Value<started)game.LastActivityUtc=started;
+            }
+            return result;
         }
-        public ulong SessionCount(string game)
+        internal PlaytimeProjection ForGame(string game)
         {
-            var records=items.Values.Where(x=>x.Game==game).ToList();
-            var baseline=records.Where(x=>x.Kind=="baseline").Select(x=>x.Count??0UL).DefaultIfEmpty(0UL).Max();
-            return checked(Math.Max(baseline,(ulong)records.Count(x=>x.Kind=="history"))+(ulong)records.Count(x=>x.Kind=="session"));
+            PlaytimeProjection found;
+            return projection.Value.TryGetValue(game,out found)?found:Empty;
         }
+        public ulong Total(string game){return ForGame(game).Total;}
+        public ulong SessionCount(string game){return ForGame(game).Count;}
     }
     public sealed class Mapping
     {
@@ -114,6 +139,7 @@ namespace PlaytimeRclone
         public List<Entry> Entries = new List<Entry>();
         public Dictionary<string, Mapping> Mappings = new Dictionary<string, Mapping>();
         public Dictionary<string, Active> Active = new Dictionary<string, Active>();
+        public Dictionary<string, string> PendingGameSyncs = new Dictionary<string, string>();
     }
     public static class Atomic
     {
@@ -140,7 +166,10 @@ namespace PlaytimeRclone
         public readonly object Gate = new object();
         private readonly string path;
         private readonly FileStream lease;
-        private State state;
+        // Commit publishes a new snapshot after its durable write.
+        private volatile State state;
+        private Ledger ledger;
+        public long LedgerValidationCount {get;private set;}
         public Repository(string directory)
         {
             Directory.CreateDirectory(directory);
@@ -149,18 +178,19 @@ namespace PlaytimeRclone
             try
             {
                 state = File.Exists(path) ? JsonSafety.Deserialize<State>(File.ReadAllText(path)) : new State();
-                Validate(state);
-                if (!File.Exists(path)) Commit(state);
+                ledger=Validate(state);
+                if (!File.Exists(path)) Commit(state,true);
             }
             catch { lease.Dispose(); throw; }
         }
-        private static void Validate(State value)
+        private Ledger Validate(State value,Ledger existing=null)
         {
             Guid device;
             if (value == null || value.Version != 1 || !Guid.TryParseExact(value.Device, "N", out device) ||
-                value.Entries == null || value.Mappings == null || value.Active == null)
+                value.Entries == null || value.Mappings == null || value.Active == null || value.PendingGameSyncs == null)
                 throw new InvalidDataException("Local state is damaged or newer than this extension. Restore a reviewed backup; no automatic reset.");
-            new Ledger(value.Entries);
+            var validated=existing;
+            if(validated==null){validated=new Ledger(value.Entries);LedgerValidationCount++;}
             if (value.Mappings.Values.Any(x => x == null || !Regex.IsMatch(x.Key ?? "", "^[a-f0-9]{64}$") || String.IsNullOrEmpty(x.Source)) ||
                 value.Mappings.Values.GroupBy(x => x.Key).Any(x => x.Count() > 1))
                 throw new InvalidDataException("Invalid or ambiguous local mappings.");
@@ -170,15 +200,42 @@ namespace PlaytimeRclone
                 if (!value.Mappings.ContainsKey(active.Key) || active.Value == null || !Guid.TryParseExact(active.Value.Id, "N", out id) ||
                     !DateTimeOffset.TryParse(active.Value.StartedUtc, out started)) throw new InvalidDataException("Invalid pending session.");
             }
+            foreach(var pending in value.PendingGameSyncs)
+                if(!value.Mappings.ContainsKey(pending.Key)||!Guid.TryParseExact(pending.Value,"N",out device))
+                    throw new InvalidDataException("Invalid pending game sync.");
+            return validated;
         }
         private State Clone() { return JsonSafety.Deserialize<State>(JsonConvert.SerializeObject(state)); }
-        private void Commit(State next)
+        private void Commit(State next,bool entriesUnchanged=false)
         {
-            Validate(next);
+            var validated=Validate(next,entriesUnchanged?ledger:null);
             Atomic.Write(path, JsonConvert.SerializeObject(next, Formatting.Indented));
-            state = next;
+            state=next;ledger=validated;
         }
         public State Snapshot() { lock (Gate) return Clone(); }
+        private static Mapping CopyMapping(Mapping value)
+        {return new Mapping{Key=value.Key,Source=value.Source,Expected=value.Expected,Intended=value.Intended,Original=value.Original};}
+        public string DeviceId {get{lock(Gate)return state.Device;}}
+        public bool IsActive(string local){lock(Gate)return state.Active.ContainsKey(local);}
+        public Mapping ReadMapping(string local)
+        {lock(Gate){Mapping mapping;return state.Mappings.TryGetValue(local,out mapping)?CopyMapping(mapping):null;}}
+        public KeyValuePair<string,Mapping>[] Mappings()
+        {lock(Gate)return state.Mappings.Select(p=>new KeyValuePair<string,Mapping>(p.Key,CopyMapping(p.Value))).ToArray();}
+        public KeyValuePair<string,Mapping>[] ProjectionMappings()
+        {
+            PrepareProjection();
+            return Mappings();
+        }
+        public void PrepareProjection()
+        {
+            Ledger current;
+            lock(Gate)current=ledger;
+            current.PrepareProjection();
+        }
+        public PlaytimeProjection ReadProjection(string local)
+        {
+            lock(Gate)return ledger.ForGame(state.Mappings[local].Key);
+        }
         public State SnapshotGame(string local)
         {
             lock(Gate)
@@ -229,22 +286,58 @@ namespace PlaytimeRclone
                 if (observed.HasValue && map.Intended.HasValue && observed.Value == map.Intended.Value)
                 { map.Expected = observed.Value; map.Intended = null; }
                 next.Active.Add(local, new Active { Id = Guid.NewGuid().ToString("N"), StartedUtc = DateTimeOffset.UtcNow.ToString("O") });
-                Commit(next); return true;
+                Commit(next,true); return true;
             }
         }
         public void EnsureBaselineCount(string local,ulong observed)
         {
             lock(Gate)
             {
-                var map=state.Mappings[local];var records=state.Entries.Where(e=>e.Game==map.Key).ToArray();
-                if(records.Any(e=>e.Kind=="baseline"&&e.Count.HasValue))return;
-                var sessions=(ulong)records.Count(e=>e.Kind=="session");
+                var map=state.Mappings[local];var projection=ledger.ForGame(map.Key);
+                if(projection.HasBaselineCount)return;
+                var sessions=projection.NativeCount;
                 var next=Clone();var date=DateTimeOffset.UtcNow.ToString("O");
-                next.Entries.Add(new Entry{Version=2,Kind="baseline",Id=Guid.NewGuid().ToString("N"),Game=map.Key,Device=state.Device,Seconds=records.Where(e=>e.Kind=="baseline").Select(e=>e.Seconds).DefaultIfEmpty(0UL).Max(),Count=observed>sessions?observed-sessions:0,StartedUtc=date,EndedUtc=date});
+                next.Entries.Add(new Entry{Version=2,Kind="baseline",Id=Guid.NewGuid().ToString("N"),Game=map.Key,Device=state.Device,Seconds=projection.BaselineSeconds,Count=observed>sessions?observed-sessions:0,StartedUtc=date,EndedUtc=date});
                 Commit(next);
             }
         }
-        public bool Stop(string local, ulong seconds)
+        public Dictionary<string,string> PendingGameSyncs()
+        {
+            lock(Gate)return new Dictionary<string,string>(state.PendingGameSyncs);
+        }
+        public void ReadGameSyncState(string local,out bool active,out bool pending)
+        {
+            var snapshot=state;
+            active=snapshot.Active.ContainsKey(local);
+            pending=snapshot.PendingGameSyncs.ContainsKey(local);
+        }
+        public void QueueGameSync(string local){QueueGameSyncs(new[]{local});}
+        public void QueueGameSyncs(IEnumerable<string> games)
+        {
+            lock(Gate)
+            {
+                var mapped=games.Distinct().Where(state.Mappings.ContainsKey).ToArray();
+                if(mapped.Length==0)return;
+                var next=Clone();
+                foreach(var game in mapped)next.PendingGameSyncs[game]=Guid.NewGuid().ToString("N");
+                Commit(next,true);
+            }
+        }
+        public void CompleteGameSyncs(IEnumerable<KeyValuePair<string,string>> completed)
+        {
+            lock(Gate)
+            {
+                var matching=completed.Where(pair=>{
+                    string token;
+                    return state.PendingGameSyncs.TryGetValue(pair.Key,out token)&&token==pair.Value;
+                }).ToArray();
+                if(matching.Length==0)return;
+                var next=Clone();
+                foreach(var pair in matching)next.PendingGameSyncs.Remove(pair.Key);
+                Commit(next,true);
+            }
+        }
+        public bool Stop(string local, ulong seconds, bool queueGameSync=false)
         {
             lock (Gate)
             {
@@ -257,6 +350,7 @@ namespace PlaytimeRclone
                 map.Expected = checked(map.Expected + seconds);
                 map.Intended = null;
                 next.Active.Remove(local);
+                if(queueGameSync)next.PendingGameSyncs[local]=active.Id;
                 Commit(next); return true;
             }
         }
@@ -268,20 +362,20 @@ namespace PlaytimeRclone
                 var map = state.Mappings[local];
                 if (observed != map.Expected && observed != map.Intended)
                     throw new InvalidOperationException("Playtime changed outside this extension. Resolve the local edit before sync can project a total. Expected " + map.Expected + ", found " + observed + ".");
-                var desired = new Ledger(state.Entries).Total(map.Key);
+                var desired = ledger.Total(map.Key);
                 if(observed==desired&&map.Expected==desired&&!map.Intended.HasValue)return;
                 var next = Clone(); next.Mappings[local].Intended = desired;
-                Commit(next); // journal before touching Playnite; either expected or intended is valid after crash
+                Commit(next,true); // journal before touching Playnite; either expected or intended is valid after crash
                 write(desired);
                 next = Clone(); next.Mappings[local].Expected = desired; next.Mappings[local].Intended = null;
-                Commit(next);
+                Commit(next,true);
             }
         }
         public void AcknowledgeLocalValue(string local, ulong observed)
         {
             lock (Gate)
             {
-                var next = Clone(); next.Mappings[local].Expected = observed; next.Mappings[local].Intended = null; Commit(next);
+                var next = Clone(); next.Mappings[local].Expected = observed; next.Mappings[local].Intended = null; Commit(next,true);
             }
         }
         public void Unenroll(string local)
@@ -289,7 +383,7 @@ namespace PlaytimeRclone
             lock (Gate)
             {
                 if (state.Active.ContainsKey(local)) throw new InvalidOperationException("Recover the unfinished session first.");
-                var next = Clone(); next.Mappings.Remove(local); Commit(next);
+                var next = Clone(); next.Mappings.Remove(local); next.PendingGameSyncs.Remove(local); Commit(next,true);
             }
         }
         public void Dispose() { lease.Dispose(); }

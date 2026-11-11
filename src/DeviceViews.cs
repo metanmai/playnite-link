@@ -20,8 +20,9 @@ namespace PlaytimeRclone
             foreach(var pair in repository.Snapshot().Mappings)
             {
                 var game=PlayniteApi.Database.Games.Get(new Guid(pair.Key));if(game==null)continue;SaveLink link;vault.State.Links.TryGetValue(pair.Value.Key,out link);
-                games.Add(new DeviceGame{Key=pair.Value.Key,Name=GameLabel(pair.Value.Key,game.Name),SaveFolder=devicePreferences.SharePaths&&link!=null?link.Folder:null,
-                    SavesEnabled=devicePreferences.SyncSaves&&link!=null&&link.HasSaves});
+                var savesEnabled=devicePreferences.SyncSaves&&SaveCloudOwnership.CanSync(game,link);
+                games.Add(new DeviceGame{Key=pair.Value.Key,Name=GameLabel(pair.Value.Key,game.Name),SaveFolder=devicePreferences.SharePaths&&savesEnabled?link.Folder:null,
+                    SavesEnabled=savesEnabled});
             }
             return games.OrderBy(g=>g.Key,StringComparer.Ordinal).ToList();
         }
@@ -71,7 +72,7 @@ namespace PlaytimeRclone
             try
             {
                 await Task.Run(async()=>{await syncGate.WaitAsync();try{action();deviceViewCache=devices.Views().ToArray();}finally{syncGate.Release();}});
-                RefreshDevicesPage();RequestSync(true);
+                RefreshDevicesPage();RequestSync(true,backgroundOnly:true);
             }
             catch(Exception ex){UI(()=>NotifyError(ex));}
         }
@@ -115,7 +116,13 @@ namespace PlaytimeRclone
         }
         private async void RestoreHistoryAsync(string key,Revision revision)
         {
-            try{await RestoreHistoryCoreAsync(key,revision);RequestSync(true);}
+            try
+            {
+                await RestoreHistoryCoreAsync(key,revision);
+                var local=repository.Mappings().FirstOrDefault(pair=>pair.Value.Key==key).Key;
+                Guid id;
+                if(Guid.TryParse(local,out id))RequestSync(true,id);
+            }
             catch(Exception ex){UI(()=>NotifyError(ex));}
         }
         private Task RestoreHistoryCoreAsync(string key,Revision revision)
@@ -135,7 +142,9 @@ namespace PlaytimeRclone
                     try
                     {
                         if(UI(()=>GameBusy(game)))throw new InvalidOperationException("Stop the game before restoring save history.");
-                        var link=Link(key);var plan=Plan(PlayniteApi.Database.Games.Get(game),key);var local=plan.Capture();var data=blobs.ImportLegacy(revision.Data);var projected=plan.Filter(data);
+                        var link=Link(key);var target=UI(()=>PlayniteApi.Database.Games.Get(game));
+                        if(!SaveCloudOwnership.CanSync(target,link))throw new IOException("Set Playnite Link as the only sync tool for these save paths before restoring.");
+                        var plan=Plan(target,key);var local=plan.Capture();var data=blobs.ImportLegacy(revision.Data);var projected=plan.Filter(data);
                         LastBackup=plan.Restore(data,Revision.ContentHashOf(local),()=>UI(()=>{
                             if(GameBusy(game))throw new IOException("The game is starting or running; history restore deferred.");
                             restoringSaves.Add(game);

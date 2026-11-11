@@ -31,16 +31,27 @@ namespace PlaytimeRclone
     {
         public readonly string Objects;
         public BackupCatalog(string root){Objects=root;Directory.CreateDirectory(root);}
-        public Dictionary<string,BackupRecord> Read()
+        private Dictionary<string,BackupRecord> ReadVerifiedObjects()
         {
             var all=new Dictionary<string,BackupRecord>();
             foreach(var file in Directory.GetFiles(Objects,"*.json"))
-            {if(new FileInfo(file).Length>1024*1024)throw new IOException("Oversized backup metadata.");var r=JsonSafety.Deserialize<BackupRecord>(File.ReadAllText(file),new JsonSerializerSettings{MissingMemberHandling=MissingMemberHandling.Error});if(r==null)throw new IOException("Null backup metadata.");r.Validate();if(Path.GetFileNameWithoutExtension(file)!=r.Hash())throw new IOException("Backup metadata hash mismatch.");all.Add(r.Hash(),r);}
+            {if(new FileInfo(file).Length>1024*1024)throw new IOException("Oversized backup metadata.");var r=JsonSafety.Deserialize<BackupRecord>(File.ReadAllText(file),new JsonSerializerSettings{MissingMemberHandling=MissingMemberHandling.Error});if(r==null)throw new IOException("Null backup metadata.");r.Validate();var hash=r.Hash();if(Path.GetFileNameWithoutExtension(file)!=hash)throw new IOException("Backup metadata hash mismatch.");all.Add(hash,r);}
+            return all;
+        }
+        private static List<string> ValidateGraph(Dictionary<string,BackupRecord> all)
+        {
             if(all.Values.GroupBy(r=>r.Id).Any(g=>g.Count()>1))throw new IOException("Conflicting backup event identity.");
             foreach(var item in all)foreach(var parent in item.Value.Parents)if(!all.ContainsKey(parent)||all[parent].BackupId!=item.Value.BackupId||all[parent].Game!=item.Value.Game)throw new IOException("Incomplete / cross-game backup ancestry.");
             var remaining=all.ToDictionary(p=>p.Key,p=>p.Value.Parents.Count);var children=all.Keys.ToDictionary(k=>k,k=>new List<string>());
             foreach(var item in all)foreach(var parent in item.Value.Parents)children[parent].Add(item.Key);
-            var ready=new Queue<string>(remaining.Where(p=>p.Value==0).Select(p=>p.Key));int seen=0;while(ready.Count>0){var id=ready.Dequeue();seen++;foreach(var child in children[id])if(--remaining[child]==0)ready.Enqueue(child);}if(seen!=all.Count)throw new IOException("Backup revision cycle.");
+            var ready=new Queue<string>(remaining.Where(p=>p.Value==0).Select(p=>p.Key));var ordered=new List<string>();while(ready.Count>0){var id=ready.Dequeue();ordered.Add(id);foreach(var child in children[id])if(--remaining[child]==0)ready.Enqueue(child);}
+            if(ordered.Count!=all.Count)throw new IOException("Backup revision cycle.");
+            return ordered;
+        }
+        public Dictionary<string,BackupRecord> Read()
+        {
+            var all=ReadVerifiedObjects();
+            ValidateGraph(all);
             return all;
         }
         public List<BackupRecord> Heads(string game,string backupId=null)
@@ -48,9 +59,15 @@ namespace PlaytimeRclone
         public void Add(BackupRecord record){record.Validate();Atomic.Write(Path.Combine(Objects,record.Hash()+".json"),record.Canonical());}
         public void Import(string directory)
         {
-            var incoming=new BackupCatalog(directory).Read();var staging=Path.Combine(Path.GetDirectoryName(Objects),"backup-merge-"+Guid.NewGuid().ToString("N"));
-            try{Directory.CreateDirectory(staging);foreach(var file in Directory.GetFiles(Objects,"*.json"))File.Copy(file,Path.Combine(staging,Path.GetFileName(file)));foreach(var pair in incoming)File.WriteAllText(Path.Combine(staging,pair.Key+".json"),pair.Value.Canonical());new BackupCatalog(staging).Read();foreach(var pair in incoming)if(!File.Exists(Path.Combine(Objects,pair.Key+".json")))Add(pair.Value);}
-            finally{if(Directory.Exists(staging))Directory.Delete(staging,true);}
+            var all=ReadVerifiedObjects();
+            var incoming=new BackupCatalog(directory).ReadVerifiedObjects();
+            var added=new HashSet<string>();
+            foreach(var pair in incoming)
+                if(!all.ContainsKey(pair.Key)){all.Add(pair.Key,pair.Value);added.Add(pair.Key);}
+            // Validate the union before publishing; an interrupted commit can
+            // only leave a valid prefix because parents are persisted first.
+            foreach(var hash in ValidateGraph(all))
+                if(added.Contains(hash))Add(all[hash]);
         }
     }
     public sealed partial class PlaytimePlugin
@@ -91,16 +108,21 @@ namespace PlaytimeRclone
             var bindings=BackupBindings();
             foreach(var item in games)foreach(var backup in Backups.GetBackups(item.Game.Id))if(!bindings.ContainsKey(backup.Id))RecordBackup(item.Key,backup);
         }
-        void PublishCloudBackups(RcloneTransport blobTransport,string cache)
+        void PublishCloudBackups(RcloneTransport blobTransport,string cache,ISet<string> games)
         {
-            var catalog=CloudBackups;var pending=catalog.Read().Where(p=>!File.Exists(Path.Combine(cache,p.Key+".json"))).ToList();
+            var catalog=CloudBackups;var pending=catalog.Read().Where(p=>(games==null||games.Contains(p.Value.Game))&&!File.Exists(Path.Combine(cache,p.Key+".json"))).ToList();
             if(pending.Count==0)return;
             blobTransport.PushFiles(blobs.DirectoryPath,pending.Select(p=>BlobReference.Parse(p.Value.Archive).Hash+".blob"));
             new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/backups/objects",cancelled:()=>closing||TransferStopped).PushFiles(catalog.Objects,pending.Select(p=>p.Key+".json"));
         }
         void DownloadCloudBackup(Game game,string key,BackupRecord record)
         {
-            var data=new SortedDictionary<string,string>{{"archive.zip",record.Archive}};blobs.Ensure(data);
+            var data=new SortedDictionary<string,string>{{"archive.zip",record.Archive}};
+            blobs.Fetch=names=>{
+                var captured=config;CheckActiveGameVault(captured,()=>closing||TransferStopped);
+                new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||TransferStopped).PullFiles(blobs.DirectoryPath,names);
+            };
+            try{blobs.Ensure(data);}finally{blobs.Fetch=null;}
             var temporary=Path.Combine(Root,"scratch","download-"+Guid.NewGuid().ToString("N")+".zip");Directory.CreateDirectory(Path.GetDirectoryName(temporary));
             try
             {
@@ -125,7 +147,7 @@ namespace PlaytimeRclone
                 var captured=record;var group=heads.Where(r=>r.BackupId==record.BackupId).ToList();
                 var item=Card(card,record.Note.Length==0?"Save backup":record.Note,DateTimeOffset.Parse(record.CreatedUtc).ToLocalTime().ToString("g")+(group.Count>1?" · conflicting backup versions":""));
                 Button(item,"Download to this device",async()=>{try{await SaveOperation(game,()=>DownloadCloudBackup(game,key,captured));refresh();QueueSync();}catch(Exception ex){Label(item,ex.Message);}});
-                if(group.Count>1)Button(item,"Keep this backup version",()=>{if(syncing!=0)throw new IOException("Wait for sync first.");captured=new BackupRecord{BackupId=record.BackupId,Game=key,Device=repository.Snapshot().Device,Archive=record.Archive,Note=record.Note,Automatic=record.Automatic,CreatedUtc=record.CreatedUtc,Parents=group.Select(r=>r.Hash()).OrderBy(h=>h,StringComparer.Ordinal).ToList()};CloudBackups.Add(captured);refresh();QueueSync();});
+                if(group.Count>1)Button(item,"Keep this backup version",()=>{if(syncing!=0)throw new IOException("Wait for sync first.");captured=new BackupRecord{BackupId=record.BackupId,Game=key,Device=repository.Snapshot().Device,Archive=record.Archive,Note=record.Note,Automatic=record.Automatic,CreatedUtc=record.CreatedUtc,Parents=group.Select(r=>r.Hash()).OrderBy(h=>h,StringComparer.Ordinal).ToList()};CloudBackups.Add(captured);refresh();QueueGameSync(game.Id);});
             }
         }
     }

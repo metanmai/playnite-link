@@ -23,6 +23,13 @@ namespace PlaytimeRclone
         public string Hash() { return Identity.Hash(Canonical()); }
         public string ContentHash() { return ContentHashOf(Data); }
         public static string ContentHashOf(SortedDictionary<string,string> data) { return Identity.Hash(JsonConvert.SerializeObject(data, Formatting.None)); }
+        internal Revision Copy()
+        {
+            var copy=(Revision)MemberwiseClone();
+            copy.Parents=new List<string>(Parents);
+            copy.Data=new SortedDictionary<string,string>(Data,StringComparer.Ordinal);
+            return copy;
+        }
         public void Validate()
         {
             Guid id, device; DateTimeOffset date;
@@ -126,6 +133,8 @@ namespace PlaytimeRclone
     public sealed class SaveLink
     {
         public string Folder;
+        [JsonProperty(NullValueHandling=NullValueHandling.Ignore)]
+        public bool? LinkManagesSaves;
         public List<SaveSource> Sources = new List<SaveSource>();
         public List<string> RestoreExclusions = new List<string>();
         public bool AutoBackup = true, NotifyBackup = true, CheckBeforeLaunch = true;
@@ -153,11 +162,12 @@ namespace PlaytimeRclone
         public bool EmptyLocal;
         public bool MissingSource;
     }
-    public sealed class ReconcileResult { public bool Cancelled; public bool Changed; public SortedDictionary<string,string> Data; public string Revision; }
+    public sealed class ReconcileResult { public bool Cancelled; public bool Deferred; public bool Changed; public SortedDictionary<string,string> Data; public string Revision; }
     public sealed class Vault
     {
         public readonly string Objects;
         private readonly string statePath;
+        private readonly object graphGate=new object();
         private sealed class CachedObject { public long Length; public DateTime Modified; public Revision Revision; }
         private readonly Dictionary<string,CachedObject> readCache = new Dictionary<string,CachedObject>(StringComparer.OrdinalIgnoreCase);
         public VaultState State { get; private set; }
@@ -187,34 +197,77 @@ namespace PlaytimeRclone
             try{State.Remote=remote;State.ConnectionIdentity=identity??"";Save();}
             catch{State.Remote=oldRemote;State.ConnectionIdentity=oldIdentity;throw;}
         }
-        public void Add(Revision revision)
-        { revision.Validate(); Atomic.Write(Path.Combine(Objects,revision.Hash()+".json"),revision.Canonical()); }
-        public void UpgradeLegacySaves(BlobStore blobs,string device)
+        private sealed class RevisionGraph
         {
-            var all=Read(Objects);
-            foreach(var link in State.Links.Values)
+            public Dictionary<string,Revision> Revisions;
+            public ILookup<Tuple<string,string>,Revision> Heads;
+            public List<string> Order;
+        }
+        private RevisionGraph graph;
+        public long GraphBuildCount {get;private set;}
+        private RevisionGraph BuildGraph(Dictionary<string,Revision> revisions)
+        {
+            var order=ValidateAndOrder(revisions);
+            GraphBuildCount++;
+            var parents=new HashSet<string>(revisions.Values.SelectMany(r=>r.Parents));
+            return new RevisionGraph
             {
-                Revision previous;
+                Revisions=revisions,Order=order,
+                Heads=revisions.Where(p=>!parents.Contains(p.Key)).OrderBy(p=>p.Key,StringComparer.Ordinal)
+                    .ToLookup(p=>Tuple.Create(p.Value.Game,p.Value.Kind),p=>p.Value)
+            };
+        }
+        private RevisionGraph Graph()
+        { lock(graphGate)return graph??(graph=BuildGraph(ReadVerified(Objects))); }
+        public Revision FindRevision(string hash)
+        {
+            Revision revision;
+            return hash!=null&&Graph().Revisions.TryGetValue(hash,out revision)?revision.Copy():null;
+        }
+        public void Add(Revision revision)
+        {
+            revision.Validate();
+            lock(graphGate)
+            {
+                graph=null;
+                Atomic.Write(Path.Combine(Objects,revision.Hash()+".json"),revision.Canonical());
+            }
+        }
+        public void UpgradeLegacySaves(BlobStore blobs,string device,string game=null)
+        {
+            var snapshot=Graph();var all=snapshot.Revisions;var changed=false;
+            foreach(var entry in State.Links)
+            {
+                if(game!=null&&entry.Key!=game)continue;
+                var link=entry.Value;Revision previous;
                 if(link.Save.Revision!=null&&all.TryGetValue(link.Save.Revision,out previous)&&previous.Version==1&&previous.Kind=="save"&&link.Save.Content==previous.ContentHash())
+                {
                     link.Save.Content=Revision.ContentHashOf(blobs.ImportLegacy(previous.Data));
+                    changed=true;
+                }
             }
-            var parents=new HashSet<string>(all.Values.SelectMany(r=>r.Parents));
-            foreach(var pair in all.Where(p=>p.Value.Kind=="save"&&p.Value.Version==1&&p.Value.Data.Count>0&&!parents.Contains(p.Key)).ToList())
+            var heads=(game==null?snapshot.Heads.Where(group=>group.Key.Item2=="save").SelectMany(group=>group):
+                snapshot.Heads[Tuple.Create(game,"save")]).ToList();
+            foreach(var revision in heads.Where(r=>r.Version==1&&r.Data.Count>0))
             {
-                var ancestry=new HashSet<string>();var pending=new Stack<string>();pending.Push(pair.Key);
+                var head=revision.Hash();var ancestry=new HashSet<string>();var pending=new Stack<string>();pending.Push(head);
                 while(pending.Count>0){var key=pending.Pop();if(!ancestry.Add(key))continue;foreach(var parent in all[key].Parents)pending.Push(parent);}
-                var migrationParents=new List<string>{pair.Key};
-                migrationParents.AddRange(all.Where(p=>!parents.Contains(p.Key)&&p.Value.MigrationOf!=null&&ancestry.Contains(p.Value.MigrationOf)).Select(p=>p.Key));
-                Add(new Revision{Version=2,Game=pair.Value.Game,Kind="save",Device=device,MigrationOf=pair.Key,Data=blobs.ImportLegacy(pair.Value.Data),Parents=migrationParents.Distinct().OrderBy(p=>p,StringComparer.Ordinal).ToList()});
+                var migrationParents=new List<string>{head};
+                migrationParents.AddRange(heads.Where(r=>r.Game==revision.Game&&r.MigrationOf!=null&&ancestry.Contains(r.MigrationOf)).Select(r=>r.Hash()));
+                Add(new Revision{Version=2,Game=revision.Game,Kind="save",Device=device,MigrationOf=head,Data=blobs.ImportLegacy(revision.Data),Parents=migrationParents.Distinct().OrderBy(p=>p,StringComparer.Ordinal).ToList()});
             }
-            Save();
+            if(changed)Save();
         }
         public Dictionary<string,Revision> Read(string directory)
         {
-            var result = new Dictionary<string,Revision>(); long bytes = 0;
+            lock(graphGate)return ReadVerified(directory).ToDictionary(p=>p.Key,p=>p.Value.Copy());
+        }
+        private Dictionary<string,Revision> ReadVerified(string directory)
+        {
+            var result = new Dictionary<string,Revision>();
             foreach (var path in Directory.GetFiles(directory,"*.json"))
             {
-                var info = new FileInfo(path);var length = info.Length; bytes += length;
+                var info = new FileInfo(path);var length = info.Length;
                 if (length > 64L*1024*1024) throw new InvalidDataException("Oversized metadata object. Save contents belong in streamed blobs.");
                 CachedObject cached;
                 if(readCache.TryGetValue(path,out cached)&&cached.Length==length&&cached.Modified==info.LastWriteTimeUtc)
@@ -229,11 +282,29 @@ namespace PlaytimeRclone
         }
         public void Import(string directory)
         {
-            var all = Read(Objects);var existing=new HashSet<string>(all.Keys);var incoming=Read(directory);foreach(var pair in incoming) all[pair.Key]=pair.Value;
-            ValidateGraph(all); // Validate the entire pull before changing local history.
-            foreach(var pair in incoming)if(!existing.Contains(pair.Key))Add(pair.Value);
+            lock(graphGate)
+            {
+                // Refresh the local inventory once per pull. Explicit additions
+                // invalidate the index, and a repaired/replaced file is re-read.
+                var local=ReadVerified(Objects);
+                var incoming=ReadVerified(directory);
+                var added=incoming.Where(p=>!local.ContainsKey(p.Key)).ToDictionary(p=>p.Key,p=>p.Value);
+                if(added.Count==0)
+                {
+                    if(graph==null||local.Count!=graph.Revisions.Count||local.Keys.Any(key=>!graph.Revisions.ContainsKey(key)))
+                        graph=BuildGraph(local);
+                    return;
+                }
+                var all=new Dictionary<string,Revision>(local);
+                foreach(var pair in added)all.Add(pair.Key,pair.Value);
+                var next=BuildGraph(all); // Validate the entire pull before changing local history.
+                foreach(var hash in next.Order)
+                    if(added.ContainsKey(hash))Add(added[hash]);
+                graph=next;
+            }
         }
-        public static void ValidateGraph(Dictionary<string,Revision> all)
+        public static void ValidateGraph(Dictionary<string,Revision> all){ValidateAndOrder(all);}
+        private static List<string> ValidateAndOrder(Dictionary<string,Revision> all)
         {
             if(all.Values.GroupBy(r=>r.Id).Any(g=>g.Count()>1)) throw new InvalidDataException("A revision ID has conflicting content.");
             foreach(var pair in all) foreach(var parent in pair.Value.Parents)
@@ -241,28 +312,32 @@ namespace PlaytimeRclone
                     throw new InvalidDataException("Incomplete or cross-game revision ancestry. Retry the pull.");
             var counts=all.ToDictionary(p=>p.Key,p=>p.Value.Parents.Count);var children=all.Keys.ToDictionary(k=>k,k=>new List<string>());
             foreach(var pair in all)foreach(var parent in pair.Value.Parents)children[parent].Add(pair.Key);
-            var ready=new Queue<string>(counts.Where(p=>p.Value==0).Select(p=>p.Key));int visited=0;
-            while(ready.Count>0){var key=ready.Dequeue();visited++;foreach(var child in children[key])if(--counts[child]==0)ready.Enqueue(child);}
-            if(visited!=all.Count)throw new InvalidDataException("Revision cycle.");
+            var ready=new Queue<string>(counts.Where(p=>p.Value==0).Select(p=>p.Key));var order=new List<string>();
+            while(ready.Count>0){var key=ready.Dequeue();order.Add(key);foreach(var child in children[key])if(--counts[child]==0)ready.Enqueue(child);}
+            if(order.Count!=all.Count)throw new InvalidDataException("Revision cycle.");
+            return order;
         }
+        public int HeadCount(string game,string kind){return Graph().Heads[Tuple.Create(game,kind)].Count();}
         public List<Revision> Heads(string game,string kind)
         {
-            var all = Read(Objects); ValidateGraph(all); var revisions=all.Where(p=>p.Value.Game==game&&p.Value.Kind==kind).ToList();
-            var parents=new HashSet<string>(revisions.SelectMany(p=>p.Value.Parents));
-            return revisions.Where(p=>!parents.Contains(p.Key)).OrderBy(p=>p.Key,StringComparer.Ordinal).Select(p=>p.Value).ToList();
+            return Graph().Heads[Tuple.Create(game,kind)].Select(revision=>revision.Copy()).ToList();
         }
         // choice: local, cancel, or a head hash. No implicit timestamp winner.
-        public ReconcileResult Reconcile(string game,string kind,string device,SortedDictionary<string,string> local,Checkpoint checkpoint,Func<Conflict,string> choose,Action<SortedDictionary<string,string>> apply,Func<SortedDictionary<string,string>,SortedDictionary<string,string>> project=null,Func<SortedDictionary<string,string>,SortedDictionary<string,string>> publishLocal=null,bool requireSourceReview=false)
+        public ReconcileResult Reconcile(string game,string kind,string device,SortedDictionary<string,string> local,Checkpoint checkpoint,Func<Conflict,string> choose,Action<SortedDictionary<string,string>> apply,Func<SortedDictionary<string,string>,SortedDictionary<string,string>> project=null,Func<SortedDictionary<string,string>,SortedDictionary<string,string>> publishLocal=null,bool requireSourceReview=false,bool allowRemoteApply=true)
         {
             if(project==null)project=d=>d;
             var heads=Heads(game,kind); var hash=Revision.ContentHashOf(local); string choice="local";
             if(heads.Count>1&&heads.All(h=>Revision.ContentHashOf(project(h.Data))==hash))choice="local";
             if(heads.Count==1 && Revision.ContentHashOf(project(heads[0].Data))==hash)
-            { checkpoint.Revision=heads[0].Hash();checkpoint.Content=hash;Save();return new ReconcileResult { Data=local,Revision=checkpoint.Revision }; }
+            {
+                var head=heads[0].Hash();
+                if(checkpoint.Revision!=head||checkpoint.Content!=hash){checkpoint.Revision=head;checkpoint.Content=hash;Save();}
+                return new ReconcileResult { Data=local,Revision=checkpoint.Revision };
+            }
             if(heads.Count==1 && checkpoint.Content==hash && checkpoint.Revision!=null)
             {
                 // Restore only if the checkpoint is an ancestor of the remote head.
-                var all=Read(Objects); var todo=new Stack<string>();var seen=new HashSet<string>();todo.Push(heads[0].Hash());
+                var all=Graph().Revisions; var todo=new Stack<string>();var seen=new HashSet<string>();todo.Push(heads[0].Hash());
                 while(todo.Count>0){var id=todo.Pop();if(!seen.Add(id))continue;foreach(var p in all[id].Parents)todo.Push(p);}
                 choice=seen.Contains(checkpoint.Revision) ? heads[0].Hash() : null;
             }
@@ -273,6 +348,8 @@ namespace PlaytimeRclone
                 choice=choose(new Conflict { Game=game,Kind=kind,LocalHash=hash,Heads=heads,EmptyLocal=!SavePlan.HasFiles(local),MissingSource=requireSourceReview });
             if(choice==null || choice=="cancel")return new ReconcileResult { Cancelled=true,Data=local };
             var selected=choice=="local" ? local : project(heads.Single(h=>h.Hash()==choice).Data);
+            var selectedHash=Revision.ContentHashOf(selected);
+            if(!allowRemoteApply&&selectedHash!=hash)return new ReconcileResult { Deferred=true,Data=local };
             string revisionId;
             if(heads.Count==1 && choice==heads[0].Hash()) revisionId=heads[0].Hash();
             else
@@ -281,8 +358,8 @@ namespace PlaytimeRclone
                 var revision=new Revision { Version=kind=="save"&&publication.Keys.Any(k=>k.StartsWith(SavePlan.Mounts,StringComparison.Ordinal))?3:kind=="save"&&(publication.Count==0||publication.Values.Any(v=>v.StartsWith("blob:",StringComparison.Ordinal)))?2:1,Game=game,Kind=kind,Device=device,Parents=heads.Select(h=>h.Hash()).OrderBy(x=>x,StringComparer.Ordinal).ToList(),Data=publication };
                 Add(revision); revisionId=revision.Hash();
             }
-            if(Revision.ContentHashOf(selected)!=hash)apply(selected);
-            checkpoint.Revision=revisionId;checkpoint.Content=Revision.ContentHashOf(selected);Save();
+            if(selectedHash!=hash)apply(selected);
+            checkpoint.Revision=revisionId;checkpoint.Content=selectedHash;Save();
             return new ReconcileResult { Data=selected,Changed=true,Revision=revisionId };
         }
     }

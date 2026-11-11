@@ -18,10 +18,12 @@ namespace PlaytimeRclone
         }
         public static JObject Object(string json){return Parse<JObject>(json);}
         public static JArray Array(string json){return Parse<JArray>(json);}
+        public static JObject Object(TextReader text){return Parse<JObject>(text);}
         private static T Parse<T>(string json)where T:JToken
+        {using(var text=new StringReader(json))return Parse<T>(text);}
+        private static T Parse<T>(TextReader text)where T:JToken
         {
-            using(var text=new StringReader(json))
-            using(var reader=new JsonTextReader(text){MaxDepth=MaximumDepth})
+            using(var reader=new JsonTextReader(text){MaxDepth=MaximumDepth,CloseInput=false})
             {
                 var result=JToken.Load(reader) as T;
                 if(result==null)throw new JsonSerializationException("Unexpected JSON root.");

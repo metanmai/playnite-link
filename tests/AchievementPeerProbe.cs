@@ -26,9 +26,13 @@ public sealed class HostProbe:GenericPlugin
         root=PlayniteApi.Paths.ConfigurationPath;Check(File.Exists(Path.Combine(root,"PROBE-ONLY")),"Isolated profile marker missing");
         subject=(PlaytimePlugin)PlayniteApi.Addons.Plugins.Single(p=>p.Id==new Guid("8ca18482-3ebe-4bf7-b229-a259b2094767"));
         while(subject.IsSyncRunning)await Task.Delay(100);
-        var engine=Field("achievementEngine");Check(engine!=null,"Built-in engine missing");Check(!PlayniteApi.Addons.Plugins.Any(p=>p.GetType().FullName==engine.GetType().FullName),"A separate achievement extension is installed");
+        var engine=PlayniteApi.Addons.Plugins.Single(p=>p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin");
+        var linkFolder=Path.GetDirectoryName(typeof(PlaytimePlugin).Assembly.Location);
+        Check(!Directory.Exists(Path.Combine(linkFolder,"AchievementEngine")),"Link bundled the achievement engine");
+        Check(File.Exists(Path.Combine(Path.GetDirectoryName(engine.GetType().Assembly.Location),"extension.yaml")),"Standalone add-on manifest was removed");
         var phase=File.ReadAllText(Path.Combine(root,"achievement-peer-phase.txt")).Trim();var repo=(Repository)Field("repository");var id=new Guid(repo.Snapshot().Mappings.Keys.Single());var game=PlayniteApi.Database.Games.Get(id);if(game==null){game=new Game{Id=id,Name="Achievement peer fixture",Playtime=100,IsInstalled=true,InstallDirectory=root};PlayniteApi.Database.Games.Add(game);}
         var custom=PluginActivityStore.Member(engine,"GameCustomDataStore");var service=PluginActivityStore.Member(engine,"AchievementDataService");
+        Check(Object.ReferenceEquals(custom,Field("achievementCustomDataStore")),"Link did not attach to the standalone customization store");
         if(phase=="author")
         {
             var record=PluginActivityStore.Call(custom,"LoadOrDefault",game.Id);var raw=JObject.FromObject(record);
@@ -36,8 +40,13 @@ public sealed class HostProbe:GenericPlugin
             ((JArray)raw["CustomAchievements"]).Add(new JObject{{"Id","bbc89bac7fe840a696c4d57e74d676c8"},{"DisplayName","Still to earn"},{"Points",10},{"Unlocked",false}});PluginActivityStore.Call(custom,"Save",game.Id,raw.ToObject(record.GetType()));
             var data=JObject.FromObject(PluginActivityStore.Call(service,"GetGameAchievementData",game.Id.ToString()));var api=(string)((JArray)data["Achievements"]).Single(r=>(string)r["DisplayName"]=="Still to earn")["ApiName"];
             raw=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));raw["GoalAchievementApiNames"]=new JArray(api);raw["AchievementNotes"]=new JObject{{api,"Written on the PC"}};PluginActivityStore.Call(custom,"Save",game.Id,raw.ToObject(record.GetType()));
+            var vaultRoot=Path.Combine(PlayniteApi.Paths.ExtensionsDataPath,subject.Id.ToString(),"achievement-customization-vault","vault-objects");
+            var deadline=DateTime.UtcNow.AddSeconds(90);
+            while(DateTime.UtcNow<deadline&&(subject.IsSyncRunning||!Directory.Exists(vaultRoot)||!Directory.EnumerateFiles(vaultRoot,"*.json").Any()))await Task.Delay(100);
+            Check(Directory.Exists(vaultRoot)&&Directory.EnumerateFiles(vaultRoot,"*.json").Any(),"Standalone add-on edit did not trigger background sync");
         }
-        await subject.SyncPersonalAsync(true,null);Check(!Convert.ToBoolean(Field("achievementSyncPending")),"Achievement sync remains pending: "+Field("achievementStatus"));
+        else await subject.SyncPersonalAsync(true,null);
+        Check(!Convert.ToBoolean(Field("achievementSyncPending")),"Achievement sync remains pending: "+Field("achievementStatus"));
         var received=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));var definitions=received["CustomAchievements"] as JArray;Check(definitions!=null&&definitions.Count==2,"Fresh peer did not receive the authored achievements");var item=definitions.Single(r=>(string)r["DisplayName"]=="Cross-device authored achievement");Check((int)item["Points"]==30&&(string)item["Category"]=="Story","Achievement metadata changed across peers");
         var goals=received["GoalAchievementApiNames"] as JArray;Check(goals!=null&&goals.Count==1,"Achievement goal did not transfer");Check((string)received["AchievementNotes"][(string)goals[0]]=="Written on the PC","Achievement note did not transfer");
         if(phase=="receive")
@@ -47,7 +56,7 @@ public sealed class HostProbe:GenericPlugin
             await subject.SyncPersonalAsync(true,null);Check(!Convert.ToBoolean(Field("achievementSyncPending")),"Peer edits did not upload");
         }
         if(phase=="verify")Check(!(bool)item["Unlocked"]&&(int)item["ProgressNum"]==7,"Returning peer lost the deliberate manual relock/progress edit");
-        var merged=JObject.FromObject(PluginActivityStore.Call(service,"GetGameAchievementData",game.Id.ToString()));Check(((JArray)merged["Achievements"]).Count==2,"Built-in achievement view cannot see the received records");
-        Finish(new{passed=true,phase,checks,localGameId=id,cloudGameKey=repo.Snapshot().Mappings[id.ToString()].Key,device=repo.Snapshot().Device,profile=root,engineBuiltIn=true});
+        var merged=JObject.FromObject(PluginActivityStore.Call(service,"GetGameAchievementData",game.Id.ToString()));Check(((JArray)merged["Achievements"]).Count==2,"Standalone achievement view cannot see the received records");
+        Finish(new{passed=true,phase,checks,localGameId=id,cloudGameKey=repo.Snapshot().Mappings[id.ToString()].Key,device=repo.Snapshot().Device,profile=root,standaloneAddon=true});
     }
 }

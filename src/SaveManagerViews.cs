@@ -16,7 +16,7 @@ namespace PlaytimeRclone
     {
         private async void QuickRestore(Game game,string key,SaveBackup backup)
         {
-            try{if(PlayniteApi.Dialogs.ShowMessage("Restore "+backup.Description+" from "+backup.CreatedAt.ToString("g")+"? Current saves will be backed up first. Exclusions remain local.","Restore backup",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;await SaveOperation(game,()=>RestoreArchive(game,key,Backups.GetFullBackupPath(backup.BackupFilePath)));QueueSync();}catch(Exception ex){NotifyError(ex);}
+            try{if(PlayniteApi.Dialogs.ShowMessage("Restore "+backup.Description+" from "+backup.CreatedAt.ToString("g")+"? Current saves will be backed up first. Exclusions remain local.","Restore backup",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;await SaveOperation(game,()=>RestoreArchive(game,key,Backups.GetFullBackupPath(backup.BackupFilePath)));QueueGameSync(game.Id);}catch(Exception ex){NotifyError(ex);}
         }
         private Task SaveOperation(Game game,Action action)
         {
@@ -37,15 +37,16 @@ namespace PlaytimeRclone
             try
             {
                 await Task.Delay(750);if(closing)return;
-                Mapping map;var state=repository.Snapshot();
-                if(state.Mappings.TryGetValue(game.Id.ToString(),out map))
-                {
-                    SaveLink link;if(vault.State.Links.TryGetValue(map.Key,out link)&&link.HasSaves&&link.AutoBackup)
-                        await SaveOperation(game,()=>CreateBackup(game,map.Key,"After playing",true));
-                }
+                var map=repository.ReadMapping(game.Id.ToString());
+                SaveLink link;
+                if(map!=null&&vault.State.Links.TryGetValue(map.Key,out link)&&SaveCloudOwnership.CanSync(game,link)&&link.AutoBackup)
+                    await SaveOperation(game,()=>{
+                        CreateBackup(game,map.Key,"After playing",true);
+                        repository.QueueGameSync(game.Id.ToString());
+                    });
             }
             catch(Exception ex){UI(()=>{NotifyError(ex);PlayniteApi.Notifications.Add(new Playnite.SDK.NotificationMessage("PlayniteLink.BackupError."+game.Id,"Automatic save backup failed for "+game.Name+": "+ex.Message,Playnite.SDK.NotificationType.Error));SaveManager.Services.ToastNotificationService.ShowBackupError(game.Name,ex.Message);});}
-            finally{if(!closing)QueueSync();}
+            finally{if(!closing)QueuePersonalSync();}
         }
         private void ShowSavePaths(Game game,string key)
         {
@@ -85,6 +86,9 @@ namespace PlaytimeRclone
                 Button(exclusions,"Exclude folder…",()=>{var path=PlayniteApi.Dialogs.SelectFolder();if(!String.IsNullOrWhiteSpace(path)){draft.RestoreExclusions.Add(SavePaths.Portable(path,game.InstallDirectory,draft.EmulatorDirectory));render();}});
                 var options=Card(panel,"Backup & launch options");
                 var confirm=Toggle(options,"Confirm before quick backups",draft.ConfirmBeforeBackup);confirm.Click+=(_,e)=>draft.ConfirmBeforeBackup=confirm.IsChecked==true;
+                var linkSaves=Toggle(options,"Sync these save paths with Playnite Link",SaveCloudOwnership.UsesLink(game,draft.LinkManagesSaves));
+                linkSaves.Click+=(_,e)=>draft.LinkManagesSaves=linkSaves.IsChecked==true;
+                Label(options,"Enable this only when Steam, Epic, or another tool does not sync these files. The setting applies on this device.",13,true);
                 var auto=Toggle(options,"Create a backup after playing",draft.AutoBackup);auto.Click+=(_,e)=>draft.AutoBackup=auto.IsChecked==true;
                 var notify=Toggle(options,"Notify me after automatic backups",draft.NotifyBackup);notify.Click+=(_,e)=>draft.NotifyBackup=notify.IsChecked==true;
                 var preflight=Toggle(options,"Check and sync cloud saves before launching",draft.CheckBeforeLaunch);preflight.Click+=(_,e)=>draft.CheckBeforeLaunch=preflight.IsChecked==true;
@@ -103,10 +107,12 @@ namespace PlaytimeRclone
                         draft.Folder=draft.Sources.Count==1&&draft.Sources[0].IsDirectory?SavePaths.Resolve(draft.Sources[0].Path,game.InstallDirectory,draft.EmulatorDirectory):null;
                         if(!draft.HasSaves&&PlayniteApi.Dialogs.ShowMessage("Stop including save files for this game? Existing local saves, backups and cloud history remain available.","Playnite Link",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
                         ValidatePlan(game,draft);var old=Link(key);draft.Save=old.Save;draft.Preferences=old.Preferences;
+                        if(SaveCloudOwnership.UsesLink(game,draft.LinkManagesSaves)&&!SaveCloudOwnership.UsesLink(game,old.LinkManagesSaves)&&
+                            PlayniteApi.Dialogs.ShowMessage("Use Playnite Link for these save paths? Confirm that Steam, Epic, and other tools do not sync these files.","Save sync ownership",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
                         if(!String.Equals(old.BackupRoot??"",draft.BackupRoot??"",StringComparison.OrdinalIgnoreCase))
                         {var config=Backups.GetGameConfig(game.Id);if(config!=null)Network("Copying and verifying this game's backups…",()=>RelocateBackupDirectory(config.ConfigId,String.IsNullOrWhiteSpace(draft.BackupRoot)?ManagerOptions.BackupRoot:draft.BackupRoot));}
                         if(GameBusy(game.Id))throw new IOException("The game started while paths were being reviewed. Stop it and retry.");
-                        vault.State.Links[key]=draft;vault.Save();
+                        vault.State.Links[key]=draft;vault.Save();ResetSaveBadge(game.Id);
                         ConfigureBackupCore(game,key);window.Close();
                     }catch(Exception ex){feedback.Text=ex.Message;}
                     finally{syncGate.Release();}
@@ -139,7 +145,7 @@ namespace PlaytimeRclone
                 var feedback=Label(panel,"",13);var actions=Actions(panel);
                 Action<Action> operation=async action=>{
                     panel.IsEnabled=false;
-                    try{await SaveOperation(game,action);if(window.IsVisible)render();QueueSync();}
+                    try{await SaveOperation(game,action);if(window.IsVisible)render();QueueGameSync(game.Id);}
                     catch(Exception ex){feedback.Text=ex.Message;}
                     finally{panel.IsEnabled=true;}
                 };
@@ -173,7 +179,7 @@ namespace PlaytimeRclone
             var preview=incoming.HasSaves?String.Join("\n",new SavePlan(incoming,game.InstallDirectory,blobs,Path.Combine(Root,"validation.json")).Sources.Select(s=>(s.IsDirectory?"Folder: ":"File: ")+s.Path)):"No live save paths. Backups remain available; configure paths before restoring.";
             if(PlayniteApi.Dialogs.ShowMessage("Use these paths for "+game.Name+"?\n\n"+preview+"\n\nReview every destination. Importing configuration does not restore saves.","Import save configuration",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
             if(!syncGate.Wait(0))throw new IOException("A sync started while reviewing paths. Try again when it finishes.");
-            try{if(GameBusy(game.Id))throw new IOException("Stop the game before importing save paths.");var old=Link(key);incoming.Save=old.Save;incoming.Preferences=old.Preferences;vault.State.Links[key]=incoming;vault.Save();ConfigureBackupCore(game,key);}finally{syncGate.Release();}
+            try{if(GameBusy(game.Id))throw new IOException("Stop the game before importing save paths.");var old=Link(key);incoming.Save=old.Save;incoming.Preferences=old.Preferences;incoming.LinkManagesSaves=old.LinkManagesSaves;vault.State.Links[key]=incoming;vault.Save();ResetSaveBadge(game.Id);ConfigureBackupCore(game,key);}finally{syncGate.Release();}
         }
         private void RestoreArchive(Game game,string key,string path)
         {RestoreArchiveCore(game,key,path,false);}
@@ -182,6 +188,7 @@ namespace PlaytimeRclone
         private void RestoreArchiveCore(Game game,string key,string path,bool includeExcluded)
         {
             if(MigrationBlocksSync)throw new IOException("Existing backups are prepared automatically. Restart Playnite to release the loaded Save Manager extension before restoring with Link.");
+            if(!SaveCloudOwnership.CanSync(game,Link(key)))throw new IOException("Set Playnite Link as the only sync tool for these save paths before restoring.");
             var plan=Plan(game,key);
             if(includeExcluded){var all=JsonSafety.Deserialize<SaveLink>(JsonConvert.SerializeObject(Link(key)));all.RestoreExclusions=new List<string>();plan=new SavePlan(all,game.InstallDirectory,blobs,Path.Combine(Root,"save-transactions",key+".json"));}
             var data=SaveArchive.Read(path,plan,blobs);var local=plan.Capture();

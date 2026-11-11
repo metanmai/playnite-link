@@ -102,14 +102,71 @@ class SaveManagerReplacementTests
         Test("portable game paths follow a relocated installation",()=>{var a=Dir();var b=Dir();var template=SavePaths.Portable(Path.Combine(a,"Saves"),a,null);Check(template=="{GameDir}\\Saves");Check(SavePaths.Resolve(template,b,null)==Path.Combine(b,"Saves"));Reject(()=>SavePaths.Resolve("{EmulatorDir}\\saves",null,null));});
         Test("emulator and profile path variables preserve directory boundaries",()=>{var dir=Dir();var emulator=Path.Combine(dir,"emu");var neighbor=Path.Combine(dir,"emu2","save");var template=SavePaths.Portable(neighbor,null,emulator);Check(!template.StartsWith("{EmulatorDir}"));Check(SavePaths.Resolve(template,null,emulator)==neighbor);var save=Path.Combine(emulator,"save");Check(SavePaths.Resolve(SavePaths.Portable(save,null,emulator),null,emulator)==save);});
         Test("legacy backup preferences and per-game root overrides migrate",()=>{var link=new SaveLink();SaveManagerOptions.ApplyLegacy(link,new JObject{{"AutoBackupOnGameExit",false},{"ShowAutoBackupNotification",false},{"ConfirmBeforeBackup",false},{"MaxAutoBackupCount",0},{"RealtimeSyncEnabled",true},{"SyncConfigOnGameStart",false},{"RestoreOnGameReinstall",false},{"CustomBackupPath","C:\\Backups"},{"GameBackupPaths",new JObject{{"fixture","D:\\GameBackups"}}}},"fixture");Check(!link.AutoBackup&&!link.NotifyBackup&&!link.ConfirmBeforeBackup&&!link.RestoreOnInstall);Check(link.MaxAutoBackups==0&&link.CheckBeforeLaunch&&link.BackupRoot=="D:\\GameBackups");});
-        foreach(var backend in new[]{"drive","dropbox","onedrive","pcloud","webdav","s3"})Test("provider configuration preserves backend and masked credential continuation / "+backend,()=>{
-            var initial=backend=="webdav"?new Dictionary<string,string>{{"url","https://example.invalid/dav"},{"vendor","other"},{"user","fixture"},{"pass"," leading and trailing "}}:backend=="s3"?new Dictionary<string,string>{{"provider","Cloudflare"},{"endpoint","https://example.invalid"},{"access_key_id","fixture"},{"secret_access_key","fixture-secret"}}:null;
-            int steps=0;CloudAccount.ConfigureProtocol(arguments=>{steps++;if(steps==1){Check(arguments[3]==backend);if(backend=="webdav"){Check(arguments.Contains("--obscure"));Check(arguments[arguments.IndexOf("pass")+1]==" leading and trailing ");}return "{\"State\":\"next\",\"Option\":{\"Name\":\"password\",\"IsPassword\":true,\"Required\":true}}";}Check(arguments.Contains("--continue")&&arguments.Last()=="secret-result");return "{\"State\":\"\"}";},"fixture.conf","fixture",backend,q=>{Check(q.Secret);return "secret-result";},(title,action)=>action(),initial);Check(steps==2);
+        foreach(var backend in new[]{"drive","dropbox","onedrive","pcloud","webdav","s3"})Test("provider continuation keeps a masked answer outside argv / "+backend,()=>{
+            const string canary="SYNTHETIC_CONTINUATION_cred-canary_070";
+            int steps=0;
+            CloudAccount.ConfigureProtocol("rclone.exe",(info,input)=>{
+                steps++;
+                Check(!info.Arguments.Contains(canary)&&input==null);
+                if(steps==1)
+                {
+                    Check(info.Arguments.Contains("\""+backend+"\""));
+                    return "{\"State\":\"next\",\"Option\":{\"Name\":\"password\",\"IsPassword\":true,\"Required\":true}}";
+                }
+                Check(info.Arguments.Contains("--continue")&&info.EnvironmentVariables["RCLONE_RESULT"]==canary&&info.EnvironmentVariables["RCLONE_STATE"]=="next");
+                return "{\"State\":\"\"}";
+            },"fixture.conf","fixture",backend,q=>{Check(q.Secret);return canary;},(title,action)=>action());
+            Check(steps==2);
+        });
+        Test("WebDAV enrollment requires HTTPS before credential entry",()=>{
+            Check(CloudAccount.WebDavEndpoint("https://example.invalid/remote.php/dav/files/account/").Host=="example.invalid");
+            Reject(()=>CloudAccount.WebDavEndpoint("http://example.invalid/dav"));
+            Reject(()=>CloudAccount.WebDavEndpoint("http://127.0.0.1:9999/dav"));
+            Reject(()=>CloudAccount.WebDavEndpoint("https://user:secret@example.invalid/dav"));
+            Reject(()=>CloudAccount.WebDavEndpoint("example.invalid/dav"));
         });
         var rclone=args.Length>1&&File.Exists(args[1])?args[1]:Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Playnite","ExtensionsData","e8b2f7a1-8c3d-4f5e-9a6b-1c2d3e4f5a6b","Tools","rclone.exe");
-        foreach(var backend in new[]{"webdav","s3"})Test("real Rclone creates a separate native provider configuration / "+backend,()=>{
-            Check(File.Exists(rclone),"Rclone runtime required");var file=Path.Combine(Dir(),"provider.conf");var values=backend=="webdav"?new Dictionary<string,string>{{"url","https://example.invalid/dav"},{"vendor","other"},{"user","fixture"},{"pass"," fixture secret "}}:new Dictionary<string,string>{{"provider","Cloudflare"},{"endpoint","https://example.invalid"},{"env_auth","false"},{"access_key_id","fixture-key"},{"secret_access_key","fixture-secret"},{"no_check_bucket","true"}};
-            CloudAccount.Configure(rclone,file,"fixture",backend,q=>{throw new Exception("Unexpected provider question: "+q.Name);},(message,action)=>action(),values);var text=File.ReadAllText(file);Check(text.Contains("type = "+backend));if(backend=="webdav")Check(!text.Contains(" fixture secret "));
+        foreach(var backend in new[]{"webdav","s3"})Test("real Rclone enrollment keeps credentials out of argv / "+backend,()=>{
+            const string canary="SYNTHETIC_INITIAL_cred-canary_070";
+            Check(File.Exists(rclone),"Rclone runtime required");
+            var file=Path.Combine(Dir(),"provider.conf");
+            var values=backend=="webdav"?new Dictionary<string,string>{{"url","https://example.invalid/dav"},{"vendor","other"},{"user","fixture"},{"pass"," "+canary+" "}}:new Dictionary<string,string>{{"provider","Cloudflare"},{"endpoint","https://example.invalid"},{"env_auth","false"},{"access_key_id","fixture-key"},{"secret_access_key",canary},{"no_check_bucket","true"}};
+            CloudAccount.ConfigureProtocol(rclone,(info,input)=>{
+                Check(!info.Arguments.Contains(canary));
+                using(var process=System.Diagnostics.Process.Start(info))
+                {
+                    var output=process.StandardOutput.ReadToEndAsync();
+                    var errors=process.StandardError.ReadToEndAsync();
+                    if(input!=null)
+                    {
+                        Check(input==" "+canary+" "&&info.RedirectStandardInput);
+                        var bytes=Encoding.UTF8.GetBytes(input+"\n");
+                        process.StandardInput.BaseStream.Write(bytes,0,bytes.Length);process.StandardInput.Close();
+                    }
+                    Check(process.WaitForExit(15000)&&process.ExitCode==0);
+                    errors.GetAwaiter().GetResult();
+                    return output.GetAwaiter().GetResult();
+                }
+            },file,"fixture",backend,q=>{throw new Exception("Unexpected provider question: "+q.Name);},(message,action)=>action(),values);
+            var config=File.ReadAllText(file);
+            Check(config.Contains("type = "+backend));
+            if(backend=="webdav")Check(config.Contains("pass = ")&&!config.Contains(canary));
+            else Check(config.Contains("secret_access_key = "+canary));
+            var final=Path.Combine(Dir(),"selected.conf");
+            CloudAccount.Configure(rclone,final,"fixture",backend,q=>{throw new Exception("Unexpected provider question: "+q.Name);},(message,action)=>action(),values);
+            Check(File.Exists(final)&&!Directory.GetDirectories(Path.GetDirectoryName(final),".enroll-*").Any());
+        });
+        Test("cancelled and failed credential enrollment remove partial configuration",()=>{
+            var enrollment=Dir();var selected=Path.Combine(enrollment,"selected.conf");File.WriteAllText(selected,"existing config");
+            var next=Path.Combine(enrollment,"next.conf");
+            var initial=new Dictionary<string,string>{{"url","https://example.invalid/dav"},{"vendor","other"},{"user","fixture"},{"pass","synthetic cleanup canary"}};
+            var attempts=0;bool stopped=false;
+            Reject(()=>CloudAccount.Configure(rclone,next,"fixture","webdav",q=>null,(message,action)=>{action();if(++attempts==2)stopped=true;},initial,()=>stopped));
+            Check(stopped&&!File.Exists(next)&&!Directory.GetDirectories(enrollment,".enroll-*").Any());
+            attempts=0;
+            Reject(()=>CloudAccount.Configure(rclone,next,"fixture","webdav",q=>null,(message,action)=>{action();if(++attempts==2)throw new IOException("Synthetic enrollment failure");},initial));
+            Check(attempts==2&&!File.Exists(next)&&!Directory.GetDirectories(enrollment,".enroll-*").Any());
+            Check(File.ReadAllText(selected)=="existing config");
         });
         Test("explicit cloud erasure is confined to the chosen vault's protocol area",()=>{
             var home=Dir();var vault=Path.Combine(home,"vault");var protocol=Path.Combine(vault,"playnite-link-v1");Directory.CreateDirectory(protocol);File.WriteAllText(Path.Combine(protocol,"owned.json"),"fixture");File.WriteAllText(Path.Combine(vault,"keep.txt"),"outside protocol");var file=Path.Combine(Dir(),"alias.conf");File.WriteAllText(file,"[fixture]\ntype = alias\nremote = "+home.Replace('\\','/')+"\n");VaultMaintenance.Purge(new SyncConfig{RcloneExe=rclone,ConfigFile=file,RemoteFolder="fixture:vault"});Check(!Directory.Exists(protocol));Check(File.ReadAllText(Path.Combine(vault,"keep.txt"))=="outside protocol");
@@ -172,6 +229,62 @@ class SaveManagerReplacementTests
         Test("large libraries report configured saves and one disable transition, not unrelated games",()=>{var prior=Receipt(Guid.NewGuid().ToString("N"),Identity.Hash("fixture"));Check(Enumerable.Range(0,250).Count(i=>GameSyncReceipt.NeedsReport(i<2,null))==2);Check(GameSyncReceipt.NeedsReport(false,prior));prior.State="disabled";Check(!GameSyncReceipt.NeedsReport(false,prior));Check(GameSyncReceipt.NeedsReport(true,prior));});
         Test("confirmation imports only uploaded receipts, never abandoned outbox history",()=>{var outbox=new GameSyncReceipts(Dir());var confirmed=new GameSyncReceipts(Dir());var abandoned=Receipt(Guid.NewGuid().ToString("N"),Identity.Hash("old"));var uploaded=Receipt(Guid.NewGuid().ToString("N"),Identity.Hash("new"));outbox.Publish(abandoned);outbox.Publish(uploaded);confirmed.ImportRecords(new[]{uploaded});Check(confirmed.Read().Count==1&&confirmed.Latest(abandoned.Device,abandoned.Game)==null&&confirmed.Latest(uploaded.Device,uploaded.Game).Hash()==uploaded.Hash());uploaded.Sequence=0;Reject(()=>confirmed.ImportRecords(new[]{uploaded}));Check(confirmed.Read().Count==1);});
         Test("multi-root format uses version 3 and older snapshots remain readable",()=>{var vault=new Vault(Dir());var data=Multi(Dir(),new BlobStore(Dir())).Capture();data["__pl_roots/source2/content"]=Convert.ToBase64String(new byte[]{1});vault.Reconcile(Identity.Hash("fixture"),"save",Guid.NewGuid().ToString("N"),data,new Checkpoint(),c=>"local",d=>{});Check(vault.Read(vault.Objects).Values.Single().Version==3);});
+        Test("both restore layouts stage all verified files before reservation and reject a late write",()=>{
+            foreach(bool multi in new[]{false,true})
+            {
+                var home=Dir();var source=Dir();var blobs=new BlobStore(Dir());
+                SavePlan target,remote;
+                if(multi){WriteMulti(home,"old");WriteMulti(source,"new");target=Multi(home,blobs);remote=Multi(source,blobs);}
+                else
+                {
+                    var targetFolder=Path.Combine(home,"first");var sourceFolder=Path.Combine(source,"first");
+                    Directory.CreateDirectory(targetFolder);Directory.CreateDirectory(sourceFolder);
+                    File.WriteAllText(Path.Combine(targetFolder,"slot.sav"),"old");File.WriteAllText(Path.Combine(sourceFolder,"slot.sav"),"new");
+                    target=new SavePlan(new SaveLink{Folder=targetFolder},null,blobs,Path.Combine(home,"journal"));
+                    remote=new SavePlan(new SaveLink{Folder=sourceFolder},null,blobs,Path.Combine(source,"journal"));
+                }
+                var incoming=remote.Capture();var expected=Revision.ContentHashOf(target.Capture());bool reserved=false;
+                Reject(()=>target.Restore(incoming,expected,()=>{
+                    reserved=true;
+                    Check(Directory.EnumerateDirectories(home,"*.pl-stage-*").Count()==(multi?2:1));
+                    if(multi)Check(Directory.EnumerateFiles(home,"*.pl-stage-*").Count()==1);
+                    File.WriteAllText(Path.Combine(home,"first","slot.sav"),"late");
+                }));
+                Check(reserved&&File.ReadAllText(Path.Combine(home,"first","slot.sav"))=="late");
+                Check(!Directory.EnumerateFileSystemEntries(home,"*.pl-stage-*").Any());
+                long reservedAt=0;
+                target.Restore(incoming,Revision.ContentHashOf(target.Capture()),()=>reservedAt=blobs.CaptureCount);
+                Check(File.ReadAllText(Path.Combine(home,"first","slot.sav"))=="new");
+                Check(blobs.CaptureCount-reservedAt==(multi?4:1));
+                Console.WriteLine((multi?"Multi-root":"Single-folder")+" restore performed "+(blobs.CaptureCount-reservedAt)+" directory checks after reservation.");
+            }
+        });
+        Test("batch receipt sequences skip abandoned attempts and suppress redundant heartbeats",()=>{
+            var outbox=new GameSyncReceipts(Dir());var confirmed=new GameSyncReceipts(Dir());
+            var device=Guid.NewGuid().ToString("N");var key=Identity.Hash("fixture");var now=DateTimeOffset.UtcNow;
+            var previous=Receipt(device,key);previous.CheckedUtc=now.ToString("O");confirmed.Publish(previous);
+            var attempt=Receipt(device,key);var next=Receipt(device,key);var other=Receipt(device,Identity.Hash("other"));
+            outbox.PublishBatch(new[]{attempt,next,other},confirmed.Read());
+            Check(attempt.Sequence==2&&next.Sequence==3&&other.Sequence==1);
+            Check(confirmed.Latest(device,key).Sequence==1&&confirmed.Read().Count==1);
+            Check(!GameSyncReceipts.NeedsHeartbeat(previous,next,now.AddSeconds(119),120));
+            Check(GameSyncReceipts.NeedsHeartbeat(previous,next,now.AddSeconds(120),120));
+            next.State="pending";Check(GameSyncReceipts.NeedsHeartbeat(previous,next,now,120));
+        });
+        Test("unchanged backup imports create no stage and a verified local parent can satisfy an incoming child",()=>{
+            var parent=Dir();var dest=new BackupCatalog(Path.Combine(parent,"objects"));var incoming=new BackupCatalog(Dir());
+            var game=Identity.Hash("fixture");var id=Guid.NewGuid().ToString("N");var device=Guid.NewGuid().ToString("N");
+            var r=new BackupRecord{BackupId=id,Game=game,Device=device,Archive="blob:"+Identity.Hash("zip")+":3",Note="base",CreatedUtc=DateTimeOffset.UtcNow.ToString("O")};dest.Add(r);
+            var child=new BackupRecord{BackupId=id,Game=game,Device=device,Archive=r.Archive,Note="child",CreatedUtc=r.CreatedUtc,Parents=new List<string>{r.Hash()}};incoming.Add(child);dest.Import(incoming.Objects);
+            var file=Path.Combine(dest.Objects,child.Hash()+".json");var timestamp=File.GetLastWriteTimeUtc(file);
+            using(var changes=new FileSystemWatcher(parent){IncludeSubdirectories=true,EnableRaisingEvents=true})
+            {
+                var writes=0;changes.Created+=(sender,eventArgs)=>Interlocked.Increment(ref writes);
+                for(int i=0;i<4;i++)dest.Import(incoming.Objects);
+                Thread.Sleep(100);Check(writes==0);Check(timestamp==File.GetLastWriteTimeUtc(file));
+            }
+            var invalid=new BackupCatalog(Dir());child.Id=Guid.NewGuid().ToString("N");child.Game=Identity.Hash("other");invalid.Add(child);Reject(()=>dest.Import(invalid.Objects));Check(dest.Read().Count==2);
+        });
         Test("cloud backup catalog merges concurrent notes and explicit deletion without losing history",()=>{
             var a=new BackupCatalog(Dir());var b=new BackupCatalog(Dir());var game=Identity.Hash("fixture");var id=Guid.NewGuid().ToString("N");var device=Guid.NewGuid().ToString("N");var archive="blob:"+Identity.Hash("zip")+":3";
             var original=new BackupRecord{BackupId=id,Game=game,Device=device,Archive=archive,Note="Before boss",CreatedUtc=DateTimeOffset.UtcNow.ToString("O")};a.Add(original);b.Import(a.Objects);

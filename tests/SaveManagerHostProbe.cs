@@ -25,6 +25,16 @@ public sealed class HostProbe:GenericPlugin
     object Field(string name){return typeof(PlaytimePlugin).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(subject);}
     object Call(string name,params object[] args){try{return typeof(PlaytimePlugin).GetMethods(BindingFlags.Instance|BindingFlags.NonPublic).Single(m=>m.Name==name&&m.GetParameters().Length==args.Length).Invoke(subject,args);}catch(TargetInvocationException ex){throw ex.InnerException;}}
     static T Event<T>(Game game)where T:new(){var value=new T();typeof(T).GetField("<Game>k__BackingField",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(value,game);return value;}
+    void ApplyCustomizations(Game game,SortedDictionary<string,string> data)
+    {
+        var package=Path.Combine(root,"apply-"+Guid.NewGuid().ToString("N")+".pa.zip");
+        try
+        {
+            var personal=AchievementCustomizationPayload.Prepare(data,subject.SaveBlobs,null,package);
+            Call("ApplyAchievementCustomization",game,data.ContainsKey(AchievementCustomizationPayload.Manifest),package,personal);
+        }
+        finally{if(File.Exists(package))File.Delete(package);}
+    }
     void Check(bool value,string message){if(!value)throw new Exception(message);checks++;}
     IEnumerable<T> Elements<T>(DependencyObject parent)where T:DependencyObject
     {for(int i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){var child=VisualTreeHelper.GetChild(parent,i);if(child is T)yield return (T)child;foreach(var nested in Elements<T>(child))yield return nested;}}
@@ -34,7 +44,7 @@ public sealed class HostProbe:GenericPlugin
     async Task Open(string method,object[] args,Action inspect)
     {
         var existing=new HashSet<Window>(Application.Current.Windows.OfType<Window>());
-        var task=Task.Run(async()=>{await Task.Delay(method=="ShowBuiltInAchievementOverview"?5000:150);await Application.Current.Dispatcher.InvokeAsync(new Action(()=>{
+        var task=Task.Run(async()=>{await Task.Delay(150);await Application.Current.Dispatcher.InvokeAsync(new Action(()=>{
             try{window=Application.Current.Windows.OfType<Window>().Last(w=>w.IsVisible&&!existing.Contains(w));window.UpdateLayout();inspect();}
             finally{if(window!=null)window.Close();}
         }));});
@@ -47,31 +57,35 @@ public sealed class HostProbe:GenericPlugin
     {
         root=PlayniteApi.Paths.ConfigurationPath;Check(File.Exists(Path.Combine(root,"PROBE-ONLY")),"Isolated profile required");
         subject=(PlaytimePlugin)PlayniteApi.Addons.Plugins.Single(p=>p.Id==new Guid("8ca18482-3ebe-4bf7-b229-a259b2094767"));await UntilIdle();subject.StopTransfer();
-        if(Directory.Exists(Path.Combine(Path.GetDirectoryName(subject.GetType().Assembly.Location),"AchievementEngine")))
-        {
-            Check(Field("achievementEngine")!=null,"Built-in achievement engine failed: "+Field("achievementEngineError"));
-            Check(!PlayniteApi.Addons.Plugins.Any(p=>p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin"),"Achievement component registered as a separate add-on");
-            Check(subject.GetSidebarItems().Any(i=>i.Title=="Link achievements"&&i.Opened!=null),"Full achievement sidebar is missing");
-            await Open("ShowBuiltInAchievementOverview",new object[0],()=>{Check(window.Content is System.Windows.FrameworkElement,"Full achievement overview did not load");Capture("built-in-achievements");});
-            await Open("ShowAchievementSettings",new object[0],()=>{Check(Elements<Button>(window).Any(b=>Convert.ToString(b.Content)=="Cancel"),"Built-in provider/settings window did not load");Capture("built-in-achievement-settings");});
-            var hub=subject.GetSidebarItems().Single(i=>i.Title=="Playnite Link");Check(hub.Type==SiderbarItemType.View&&hub.Opened!=null,"Main Link sidebar is not an in-app view");
-            window=new Window{Title="Link sidebar preview",Width=1000,Height=760,Content=hub.Opened(),WindowStartupLocation=WindowStartupLocation.CenterScreen};window.Show();await Task.Delay(700);
-            Check(Elements<TextBlock>(window).Any(t=>t.Text=="Playnite Link"),"Sidebar dashboard title is missing");Check(Elements<Button>(window).Any(b=>Convert.ToString(b.Content)=="Connected devices")&&Elements<Button>(window).Any(b=>Convert.ToString(b.Content)=="Achievements"),"Sidebar dashboard navigation is incomplete");
-            var prior=Field("status");typeof(PlaytimePlugin).GetField("status",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(subject,"Live sidebar status fixture");await Task.Delay(700);Check(Elements<TextBlock>(window).Any(t=>t.Text=="Live sidebar status fixture"),"Sidebar status does not refresh");Capture("link-sidebar");typeof(PlaytimePlugin).GetField("status",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(subject,prior);window.Close();
-        }
+        var hub=subject.GetSidebarItems().Single(i=>i.Title=="Playnite Link");Check(hub.Type==SiderbarItemType.View&&hub.Opened!=null,"Main Link sidebar is not an in-app view");
+        window=new Window{Title="Link sidebar preview",Width=1000,Height=760,Content=hub.Opened(),WindowStartupLocation=WindowStartupLocation.CenterScreen};window.Show();await Task.Delay(700);
+        Check(Elements<TextBlock>(window).Any(t=>t.Text=="Playnite Link"),"Sidebar dashboard title is missing");Check(Elements<Button>(window).Any(b=>Convert.ToString(b.Content)=="Connected devices"),"Sidebar dashboard navigation is incomplete");
+        var prior=Field("status");typeof(PlaytimePlugin).GetField("status",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(subject,"Live sidebar status fixture");await Task.Delay(700);Check(Elements<TextBlock>(window).Any(t=>t.Text=="Live sidebar status fixture"),"Sidebar status does not refresh");Capture("link-sidebar");typeof(PlaytimePlugin).GetField("status",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(subject,prior);window.Close();
         var repo=(Repository)Field("repository");var gameId=new Guid("f3d3b83a-fc3f-40ec-87c5-24094bdd81d9");
         var game=new Game{Id=gameId,Name="Cross-device save fixture",InstallDirectory=root,IsInstalled=true,Playtime=100};PlayniteApi.Database.Games.Add(game);var key=repo.Snapshot().Mappings[gameId.ToString()].Key;
-        if(Field("achievementEngine")!=null)
+        var engine=PlayniteApi.Addons.Plugins.SingleOrDefault(p=>p.GetType().FullName=="PlayniteAchievements.PlayniteAchievementsPlugin");
+        if(engine!=null)
         {
-            await subject.SyncPersonalAsync(true,null);var engine=Field("achievementEngine");var custom=PluginActivityStore.Member(engine,"GameCustomDataStore");var current=PluginActivityStore.Call(custom,"LoadOrDefault",game.Id);var authored=JObject.FromObject(current);var customId=Guid.NewGuid().ToString("N");
+            await subject.SyncPersonalAsync(true,null);var custom=PluginActivityStore.Member(engine,"GameCustomDataStore");var current=PluginActivityStore.Call(custom,"LoadOrDefault",game.Id);var authored=JObject.FromObject(current);var customId=Guid.NewGuid().ToString("N");
             authored["CustomAchievements"]=new JArray(new JObject{{"Id",customId},{"DisplayName","Portable authored achievement"},{"Description","Custom description"},{"Unlocked",true},{"UnlockTimeUtc","2026-10-23T01:00:00Z"},{"ProgressNum",3},{"ProgressDenom",10},{"Points",25},{"Category","Story"}});
             authored["AchievementNotes"]=new JObject{{"TEST_UNLOCK","A note from the PC"}};PluginActivityStore.Call(custom,"Save",game.Id,authored.ToObject(current.GetType()));
+            // Exercise a large portable icon through the standalone exporter.
+            var icons=PluginActivityStore.Member(engine,"ManagedCustomIconService");
+            var customIcons=(string)PluginActivityStore.Call(icons,"GetGameCustomIconDirectory",game.Id.ToString("D"));
+            Directory.CreateDirectory(customIcons);var largeIcon=Path.Combine(customIcons,"dispatcher-fixture.png");
+            var png=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=");
+            await Task.Run(()=>{using(var image=File.Create(largeIcon)){image.Write(png,0,png.Length);var bytes=new byte[1024*1024];var random=new Random(17);for(int i=0;i<24;i++){random.NextBytes(bytes);image.Write(bytes,0,bytes.Length);}}});
+            var large=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));
+            large["CustomAchievements"][0]["UnlockedIconPath"]=largeIcon;PluginActivityStore.Call(custom,"Save",game.Id,large.ToObject(current.GetType()));
+            var largePackage=await Task.Run(()=>(SortedDictionary<string,string>)Call("CaptureAchievementCustomization",game));
+            Check(largePackage.Any(p=>p.Key.StartsWith("images/")&&BlobReference.Parse(p.Value).Length>=24L*1024*1024),"Large synthetic icon did not export");
+            PluginActivityStore.Call(custom,"Save",game.Id,authored.ToObject(current.GetType()));
             var package=(SortedDictionary<string,string>)Call("CaptureAchievementCustomization",game);Check(package.ContainsKey("custom-data.pa")&&package.ContainsKey("link-personal-state.json"),"Authored achievement package/personal state missing");
-            var other=new Game{Id=Guid.NewGuid(),Name="Receiving device fixture"};PlayniteApi.Database.Games.Add(other);Call("ApplyAchievementCustomization",other,package);var received=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",other.Id));var authoredRows=(JArray)received["CustomAchievements"];
+            var other=new Game{Id=Guid.NewGuid(),Name="Receiving device fixture"};PlayniteApi.Database.Games.Add(other);ApplyCustomizations(other,package);var received=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",other.Id));var authoredRows=(JArray)received["CustomAchievements"];
             Check(authoredRows.Count==1&&(string)authoredRows[0]["DisplayName"]=="Portable authored achievement","Custom achievement catalog did not transfer");Check((bool)authoredRows[0]["Unlocked"]&&(int)authoredRows[0]["ProgressNum"]==3,"Custom unlock/progress did not transfer");Check((string)authoredRows[0]["Category"]=="Story"&&(int)authoredRows[0]["Points"]==25,"Custom category/points did not transfer");
             var again=(SortedDictionary<string,string>)Call("CaptureAchievementCustomization",game);Check(Revision.ContentHashOf(package)==Revision.ContentHashOf(again),"Repeated customization export is not content-stable");
-            authoredRows[0]["Unlocked"]=false;authoredRows[0]["UnlockTimeUtc"]=null;PluginActivityStore.Call(custom,"Save",other.Id,received.ToObject(current.GetType()));var relocked=(SortedDictionary<string,string>)Call("CaptureAchievementCustomization",other);Call("ApplyAchievementCustomization",game,relocked);var afterReset=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));Check(!(bool)afterReset["CustomAchievements"][0]["Unlocked"],"Explicit manual relock was lost across devices");
-            Call("ApplyAchievementCustomization",game,new SortedDictionary<string,string>());var cleared=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));Check((cleared["CustomAchievements"] as JArray??new JArray()).Count==0,"Removing authored achievements did not transfer");
+            authoredRows[0]["Unlocked"]=false;authoredRows[0]["UnlockTimeUtc"]=null;PluginActivityStore.Call(custom,"Save",other.Id,received.ToObject(current.GetType()));var relocked=(SortedDictionary<string,string>)Call("CaptureAchievementCustomization",other);ApplyCustomizations(game,relocked);var afterReset=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));Check(!(bool)afterReset["CustomAchievements"][0]["Unlocked"],"Explicit manual relock was lost across devices");
+            ApplyCustomizations(game,new SortedDictionary<string,string>());var cleared=JObject.FromObject(PluginActivityStore.Call(custom,"LoadOrDefault",game.Id));Check((cleared["CustomAchievements"] as JArray??new JArray()).Count==0,"Removing authored achievements did not transfer");
             var assembly=engine.GetType().Assembly;var dataType=assembly.GetType("PlayniteAchievements.Models.Achievements.GameAchievementData",true);var rowType=assembly.GetType("PlayniteAchievements.Models.Achievements.AchievementDetail",true);var sourceData=Activator.CreateInstance(dataType);dataType.GetProperty("ProviderKey").SetValue(sourceData,"Steam",null);dataType.GetProperty("AppId").SetValue(sourceData,1234,null);
             var row=Activator.CreateInstance(rowType);rowType.GetProperty("ApiName").SetValue(row,"PORTABLE_PROVIDER_UNLOCK",null);rowType.GetProperty("DisplayName").SetValue(row,"Provider achievement",null);rowType.GetProperty("Description").SetValue(row,"Full provider metadata",null);rowType.GetProperty("Points").SetValue(row,25,null);rowType.GetProperty("GlobalPercentUnlocked").SetValue(row,17.5,null);rowType.GetProperty("Unlocked").SetValue(row,true,null);rowType.GetProperty("UnlockTimeUtc").SetValue(row,new DateTime(2026,10,23,1,0,0,DateTimeKind.Utc),null);((System.Collections.IList)dataType.GetProperty("Achievements").GetValue(sourceData,null)).Add(row);
             var cache=PluginActivityStore.Member(engine,"CacheManager");var saved=PluginActivityStore.Call(cache,"SaveGameData",game.Id.ToString(),sourceData);Check(Convert.ToBoolean(PluginActivityStore.Member(saved,"Success")),"Provider fixture cache did not save");var nativeStore=new AchievementStore(Path.Combine(root,"provider-catalog-fixture"));var catalogKey=Identity.Hash("provider-catalog-fixture");var adapter=new AchievementAdapter(engine,true);adapter.Capture(nativeStore,game,catalogKey,repo.Snapshot().Device);

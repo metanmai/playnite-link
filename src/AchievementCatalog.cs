@@ -51,11 +51,47 @@ namespace PlaytimeRclone
     public sealed class AchievementCatalogStore
     {
         public readonly string Objects;
+        private Dictionary<string,AchievementCatalog> catalogs;
+        private readonly Dictionary<string,List<AchievementCatalog>> byGame=new Dictionary<string,List<AchievementCatalog>>(StringComparer.Ordinal);
+        private readonly Dictionary<Tuple<string,string>,List<AchievementCatalog>> byScope=new Dictionary<Tuple<string,string>,List<AchievementCatalog>>();
         public AchievementCatalogStore(string root){Objects=Path.Combine(root,"achievement-catalogs");Directory.CreateDirectory(Objects);}
-        public List<AchievementCatalog> ReadAll(){return Directory.GetFiles(Objects,"*.json").Select(AchievementCatalog.Read).ToList();}
-        public void Import(string directory){if(!Directory.Exists(directory))return;var batch=Directory.GetFiles(directory,"*.json").Select(AchievementCatalog.Read).ToArray();foreach(var value in batch)Put(value);}
-        void Put(AchievementCatalog value){value.Validate();var path=Path.Combine(Objects,value.Hash()+".json");if(!File.Exists(path))Atomic.Write(path,value.Canonical());}
-        public void Observe(AchievementCatalog value){value.Validate();if(ReadAll().Any(r=>r.Game==value.Game&&r.Scope==value.Scope&&JToken.DeepEquals(r.Data,value.Data)))return;Put(value);}
-        public AchievementCatalog Single(string game){var sets=ReadAll().Where(r=>r.Game==game).GroupBy(r=>r.Scope).ToArray();return sets.Length==1?sets[0].OrderByDescending(r=>DateTimeOffset.Parse(r.CreatedUtc)).ThenBy(r=>r.Hash(),StringComparer.Ordinal).First():null;}
+        public int CatalogReads {get;private set;}
+        private void Load()
+        {
+            if(catalogs!=null)return;
+            catalogs=Directory.EnumerateFiles(Objects,"*.json").Select(path=>{CatalogReads++;return AchievementCatalog.Read(path);}).ToDictionary(r=>r.Hash(),StringComparer.Ordinal);
+            foreach(var value in catalogs.Values)Index(value);
+        }
+        private void Index(AchievementCatalog value)
+        {
+            List<AchievementCatalog> game,scope;
+            if(!byGame.TryGetValue(value.Game,out game)){game=new List<AchievementCatalog>();byGame.Add(value.Game,game);}
+            game.Add(value);
+            var key=Tuple.Create(value.Game,value.Scope);
+            if(!byScope.TryGetValue(key,out scope)){scope=new List<AchievementCatalog>();byScope.Add(key,scope);}
+            scope.Add(value);
+        }
+        public List<AchievementCatalog> ReadAll(){Load();return catalogs.Values.ToList();}
+        public List<AchievementCatalog> ForGame(string game)
+        {Load();List<AchievementCatalog> known;return byGame.TryGetValue(game,out known)?known.ToList():new List<AchievementCatalog>();}
+        public void Import(string directory)
+        {if(!Directory.Exists(directory))return;var batch=Directory.EnumerateFiles(directory,"*.json").Select(AchievementCatalog.Read).ToArray();foreach(var value in batch)Put(value);}
+        private void Put(AchievementCatalog value)
+        {
+            value.Validate();var hash=value.Hash();var path=Path.Combine(Objects,hash+".json");
+            if(!File.Exists(path))Atomic.Write(path,value.Canonical());
+            if(catalogs!=null&&!catalogs.ContainsKey(hash)){catalogs.Add(hash,value);Index(value);}
+        }
+        public void Observe(AchievementCatalog value)
+        {
+            value.Validate();Load();
+            List<AchievementCatalog> known;
+            if(byScope.TryGetValue(Tuple.Create(value.Game,value.Scope),out known)&&known.Any(r=>JToken.DeepEquals(r.Data,value.Data)))return;
+            Put(value);
+        }
+        public static AchievementCatalog Latest(IEnumerable<AchievementCatalog> source)
+        {return source.OrderByDescending(r=>DateTimeOffset.Parse(r.CreatedUtc)).ThenBy(r=>r.Hash(),StringComparer.Ordinal).First();}
+        public AchievementCatalog Single(string game)
+        {var sets=ForGame(game).GroupBy(r=>r.Scope).ToArray();return sets.Length==1?Latest(sets[0]):null;}
     }
 }

@@ -28,6 +28,22 @@ namespace PlaytimeRclone
     {
         public readonly string Objects;
         Dictionary<string,AchievementRecord> cache;
+        readonly Dictionary<Tuple<string,string,string>,List<AchievementRecord>> byIdentity=new Dictionary<Tuple<string,string,string>,List<AchievementRecord>>();
+        readonly Dictionary<string,List<AchievementRecord>> byGame=new Dictionary<string,List<AchievementRecord>>(StringComparer.Ordinal);
+        static Tuple<string,string,string> Key(AchievementRecord record){return Tuple.Create(record.Game,record.Scope,record.Id);}
+        static void Index<TKey>(Dictionary<TKey,List<AchievementRecord>> index,TKey key,AchievementRecord record)
+        {
+            List<AchievementRecord> list;
+            if(!index.TryGetValue(key,out list)){list=new List<AchievementRecord>();index.Add(key,list);}
+            list.Add(record);
+        }
+        void Index(AchievementRecord record){Index(byIdentity,Key(record),record);Index(byGame,record.Game,record);}
+        void Load()
+        {
+            if(cache!=null)return;
+            cache=Directory.EnumerateFiles(Objects,"*.json").Select(Read).ToDictionary(r=>r.Hash(),StringComparer.Ordinal);
+            foreach(var record in cache.Values)Index(record);
+        }
         public AchievementStore(string root){Objects=Path.Combine(root,"achievement-objects");Directory.CreateDirectory(Objects);}
         public static AchievementRecord Read(string file)
         {
@@ -36,7 +52,7 @@ namespace PlaytimeRclone
             if(record==null)throw new InvalidDataException("Empty achievement record.");record.Validate();
             if(Path.GetFileNameWithoutExtension(file)!=record.Hash())throw new InvalidDataException("Achievement record hash mismatch.");return record;
         }
-        public List<AchievementRecord> ReadAll(){if(cache==null)cache=Directory.GetFiles(Objects,"*.json").Select(Read).ToDictionary(r=>r.Hash(),StringComparer.Ordinal);return cache.Values.ToList();}
+        public List<AchievementRecord> ReadAll(){Load();return cache.Values.ToList();}
         public void Import(string directory)
         {
             if(!Directory.Exists(directory))return;
@@ -44,23 +60,28 @@ namespace PlaytimeRclone
             var records=Directory.GetFiles(directory,"*.json").Select(Read).ToArray();
             foreach(var record in records)Put(record);
         }
-        void Put(AchievementRecord record){record.Validate();var hash=record.Hash();var path=Path.Combine(Objects,hash+".json");if(!File.Exists(path))Atomic.Write(path,record.Canonical());if(cache!=null)cache[hash]=record;}
+        void Put(AchievementRecord record){record.Validate();var hash=record.Hash();var path=Path.Combine(Objects,hash+".json");if(!File.Exists(path))Atomic.Write(path,record.Canonical());if(cache!=null&&!cache.ContainsKey(hash)){cache.Add(hash,record);Index(record);}}
         public bool Observe(AchievementRecord record)
         {
-            record.Validate();var old=Merge(ReadAll().Where(r=>r.Game==record.Game&&r.Scope==record.Scope&&r.Id==record.Id)).SingleOrDefault();
+            record.Validate();Load();List<AchievementRecord> matching;byIdentity.TryGetValue(Key(record),out matching);
+            var old=matching==null?null:Merge(matching).Single();
             if(old!=null&&(!record.Unlocked||old.Unlocked)&&(record.UnlockedUtc==null||old.UnlockedUtc!=null&&String.CompareOrdinal(old.UnlockedUtc,NormalizeDate(record.UnlockedUtc))<=0)&&(!record.Progress.HasValue||old.Target==record.Target&&old.Progress>=record.Progress))return false;
             Put(record);return true;
         }
-        public void ObserveMany(IEnumerable<AchievementRecord> values)
+        public int ObservationCandidates {get;private set;}
+        public void ObserveMany(IEnumerable<AchievementRecord> values,Action check=null)
         {
-            var batch=values.ToArray();foreach(var record in batch)record.Validate();
-            var existing=ReadAll();
+            var batch=values.ToArray();foreach(var record in batch){if(check!=null)check();record.Validate();}
+            Load();
             foreach(var record in batch)
             {
-                var matching=existing.Where(r=>r.Game==record.Game&&r.Scope==record.Scope&&r.Id==record.Id).ToArray();
+                if(check!=null)check();
+                List<AchievementRecord> known;
+                var matching=byIdentity.TryGetValue(Key(record),out known)?(IEnumerable<AchievementRecord>)known:Enumerable.Empty<AchievementRecord>();
+                if(known!=null)ObservationCandidates+=known.Count;
                 var before=Merge(matching).SingleOrDefault();var after=Merge(matching.Concat(new[]{record})).Single();
                 if(before!=null&&before.Unlocked==after.Unlocked&&before.UnlockedUtc==after.UnlockedUtc&&before.Progress==after.Progress&&before.Target==after.Target)continue;
-                Put(record);existing.Add(record);
+                Put(record);
             }
         }
         static string NormalizeDate(string value){return DateTimeOffset.Parse(value).ToUniversalTime().ToString("O");}
@@ -77,6 +98,6 @@ namespace PlaytimeRclone
                 return result;
             }).OrderBy(r=>r.Game,StringComparer.Ordinal).ThenBy(r=>r.Scope,StringComparer.Ordinal).ThenBy(r=>r.Id,StringComparer.Ordinal).ToList();
         }
-        public List<AchievementRecord> ForGame(string key){return Merge(ReadAll().Where(r=>r.Game==key));}
+        public List<AchievementRecord> ForGame(string key){Load();List<AchievementRecord> records;return byGame.TryGetValue(key,out records)?Merge(records):new List<AchievementRecord>();}
     }
 }

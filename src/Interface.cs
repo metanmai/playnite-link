@@ -59,7 +59,7 @@ namespace PlaytimeRclone
             if(section!=null)
             {
                 var nav=Actions(body);
-                foreach(var name in new[]{"Overview","Devices","Protection","Add-ons"})
+                foreach(var name in new[]{"Overview","Sync settings","Devices","Protection","Add-ons"})
                 {
                     var target=name;var action=Button(nav,target,()=>OpenAccountPage(target));
                     if(target==section){StyleAction(action,true);action.IsEnabled=false;}

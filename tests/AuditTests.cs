@@ -82,6 +82,30 @@ internal static class AuditTests
             {bool rejected=false;try{action();}catch(IOException){rejected=true;}Require(rejected);}
             Require(File.Exists(Path.Combine(setup.DirectoryPath,"applied.json")));
         });
-        Console.WriteLine("RESULT " + (8-failed) + " passed, " + failed + " failed");return failed==0?0:1;
+        Test("launch reuses the target result while unrelated work owns the gate",()=>{
+            using(var gate=new System.Threading.SemaphoreSlim(0,1))
+            using(var ready=new System.Threading.ManualResetEventSlim(false))
+            {
+                var watch=System.Diagnostics.Stopwatch.StartNew();
+                var launch=LaunchSyncWait.ReuseOrEnter(gate,()=>ready.IsSet,2000);
+                ready.Set();
+                Require(launch.GetAwaiter().GetResult());
+                Require(gate.CurrentCount==0&&watch.ElapsedMilliseconds<2000);
+                Console.WriteLine("Target launch check completed in "+watch.ElapsedMilliseconds+" ms while unrelated work retained the gate.");
+            }
+        });
+        Test("launch wait expires when the active cycle has not checked the target",()=>{
+            using(var gate=new System.Threading.SemaphoreSlim(0,1))
+            {
+                bool timedOut=false;
+                try{LaunchSyncWait.ReuseOrEnter(gate,()=>false,100).GetAwaiter().GetResult();}
+                catch(TimeoutException){timedOut=true;}
+                Require(timedOut&&gate.CurrentCount==0);
+                gate.Release();
+                Require(!LaunchSyncWait.ReuseOrEnter(gate,()=>false,100).GetAwaiter().GetResult());
+                Require(gate.CurrentCount==0);
+            }
+        });
+        Console.WriteLine("RESULT " + (10-failed) + " passed, " + failed + " failed");return failed==0?0:1;
     }
 }

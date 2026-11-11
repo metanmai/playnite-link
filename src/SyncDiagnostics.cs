@@ -15,7 +15,7 @@ namespace PlaytimeRclone
                 if(!File.Exists(script))throw new IOException("Diagnostic collector is missing. Reinstall the complete Link package.");
                 var args="-NoProfile -ExecutionPolicy Bypass -File "+RcloneTransport.Quote(script)+" -ProfilePath "+RcloneTransport.Quote(PlayniteApi.Paths.ConfigurationPath);
                 await Task.Run(()=>{using(var process=Process.Start(new ProcessStartInfo("powershell.exe",args){UseShellExecute=false,CreateNoWindow=true,RedirectStandardError=true})){var error=process.StandardError.ReadToEndAsync();if(!process.WaitForExit(60000)){process.Kill();throw new IOException("Diagnostic collection timed out.");}if(process.ExitCode!=0)throw new IOException("Diagnostic collection failed. Check the active profile location.");}});
-                PlayniteApi.Dialogs.ShowMessage("A privacy-filtered PlayniteLink-diagnostics ZIP has been saved in Downloads. It contains session and sync summaries, with no credentials or save files.","Playnite Link");
+                PlayniteApi.Dialogs.ShowMessage("A privacy-filtered PlayniteLink-diagnostics ZIP has been saved in Downloads. Game and device aliases change with each export. The report includes times to the minute, exact session durations and your time zone. Archive and file metadata can reveal the collection time. It excludes credentials and save files.","Playnite Link");
             }
             catch(Exception ex){NotifyError(ex);}
         }

@@ -22,21 +22,15 @@ namespace PlaytimeRclone
   private Dictionary<string,string> gameLabels;
   private Dictionary<string,string> GameLabels{get{return gameLabels??(gameLabels=File.Exists(Path.Combine(Root,"game-labels.json"))?JsonSafety.Deserialize<Dictionary<string,string>>(File.ReadAllText(Path.Combine(Root,"game-labels.json"))):new Dictionary<string,string>());}}
   private string GameLabel(string key,string fallback){string value;return GameLabels.TryGetValue(key,out value)?value:fallback;}
-  private void CheckActiveGameVault(SyncConfig captured)
-  {
-   captured.Validate();var proof=ConnectionProbe.Test(captured);
-   if(!String.IsNullOrWhiteSpace(vault.State.Remote)&&vault.State.Remote.TrimEnd('/')!=captured.RemoteFolder.TrimEnd('/'))throw new InvalidOperationException("Use Switch vault / start fresh before selecting another vault.");
-   var expected=vault.State.ConnectionIdentity;
-   if(!String.IsNullOrWhiteSpace(expected)||!String.IsNullOrWhiteSpace(proof.Identity))vault.PinVerified(captured.RemoteFolder,proof.Identity,String.IsNullOrWhiteSpace(expected)?proof.Identity:expected);
-   else vault.Pin(captured.RemoteFolder);
-  }
+  private void CheckActiveGameVault(SyncConfig captured,Func<bool> cancelled=null)
+  {ConnectionProbe.VerifyVault(vault,captured,cancelled??(()=>closing||vaultSwitchPending));}
   private async Task<CloudGameChoice[]> DiscoverCloudGames(Func<bool> cancelled)
   {
    if(vaultSwitchPending)throw new InvalidOperationException("Restart Playnite to finish switching vaults.");
    if(String.IsNullOrWhiteSpace(config.RemoteFolder))throw new InvalidOperationException("Connect your storage before adding games to the cloud.");
    if(!await syncGate.WaitAsync(0))throw new InvalidOperationException("A sync is running. Wait for it to finish, then refresh.");
    Interlocked.Exchange(ref syncing,1);
-   try{return await Task.Run(()=>{CheckTransferForDiscovery();var captured=config;CheckActiveGameVault(captured);var cache=Path.Combine(Root,"cloud-game-discovery");Directory.CreateDirectory(cache);ReportStatus("Reading games linked in this vault.",SyncDisplayState.Working,"Checking cloud games");new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/devices/objects",limitSeconds:20,cancelled:()=>closing||cancelled()).Pull(cache);devices.Import(cache);var discovered=new DeviceDirectory(Path.Combine(cache,"verified-cloud"));discovered.Import(cache);deviceViewCache=devices.Views().ToArray();ReportStatus("Cloud game list checked.",SyncDisplayState.Completed,"Cloud games ready");return CloudGameChoice.FromDevices(discovered.Views(true));});}
+   try{return await Task.Run(()=>{CheckTransferForDiscovery();var captured=config;CheckActiveGameVault(captured,()=>closing||cancelled());var cache=Path.Combine(Root,"cloud-game-discovery");Directory.CreateDirectory(cache);ReportStatus("Reading games linked in this vault.",SyncDisplayState.Working,"Checking cloud games");new RcloneTransport(captured.RcloneExe,captured.ConfigFile,captured.RemoteFolder,"playnite-link-v1/devices/objects",limitSeconds:20,cancelled:()=>closing||cancelled()).Pull(cache);devices.Import(cache);var discovered=new DeviceDirectory(Path.Combine(cache,"verified-cloud"));discovered.Import(cache);deviceViewCache=devices.Views().ToArray();ReportStatus("Cloud game list checked.",SyncDisplayState.Completed,"Cloud games ready");return CloudGameChoice.FromDevices(discovered.Views(true));});}
    finally{Interlocked.Exchange(ref syncing,0);syncGate.Release();}
   }
   private void CheckTransferForDiscovery(){if(closing)throw new OperationCanceledException();}
@@ -55,7 +49,10 @@ namespace PlaytimeRclone
    var name=EntryField(newForm,"Game name",game.Name??"");name.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty,"CloudGameName");
    var add=link;
    var refresh=Button(panel,"Check cloud games again",()=>{});
+   var storeLauncher=SaveCloudOwnership.HasStoreLauncher(game);
+   if(storeLauncher)Label(panel,"Link leaves saves to Steam or Epic by default. You can choose who syncs these files later in Save paths & options.",13,true);
    var savePanel=Card(panel,"Include save files","Optional");
+   if(storeLauncher)savePanel.Visibility=Visibility.Collapsed;
    var saveFolder=new TextBox{IsReadOnly=true,Text="",Margin=new Thickness(0,4,0,4)};saveFolder.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty,"LinkSaveFolder");StyleInput(saveFolder);savePanel.Children.Add(saveFolder);
    var saveActions=Actions(savePanel);var chooseSave=Button(saveActions,"Choose save folder…",()=>{var folder=PlayniteApi.Dialogs.SelectFolder();if(!String.IsNullOrWhiteSpace(folder))saveFolder.Text=SaveFiles.Root(folder);});
    var clearSave=Button(saveActions,"Skip save files",()=>saveFolder.Text="");
@@ -79,7 +76,7 @@ namespace PlaytimeRclone
      var entries=repository.SnapshotGame(game.Id.ToString()).Entries;var me=repository.Snapshot().Device;
      ReportStatus("",SyncDisplayState.Working,"Publishing game");
      await Task.Run(()=>{
-      CheckActiveGameVault(config);var outgoing=Path.Combine(Root,"game-publish",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(outgoing);
+      CheckActiveGameVault(config,()=>closing||closed);var outgoing=Path.Combine(Root,"game-publish",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(outgoing);
       try{foreach(var activity in new[]{false,true}){var selected=entries.Where(e=>activity?(e.Kind=="history"||e.Count.HasValue):(e.Kind!="history"&&!e.Count.HasValue)).ToArray();foreach(var entry in selected)File.WriteAllText(Path.Combine(outgoing,entry.Hash()+".json"),entry.Canonical());new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,activity?"playnite-link-v1/activity/objects":"playnite-link-v1/ledger/objects",limitSeconds:30,cancelled:()=>closing||closed).PushFiles(outgoing,selected.Select(e=>e.Hash()+".json"));}
        devices.PublishProfile(me,devicePreferences,UI(()=>DeviceGames()));var heads=devices.Heads(me,"profile");var graph=devices.Read(devices.Objects);var needed=new HashSet<string>();Action<string> include=null;include=hash=>{if(File.Exists(Path.Combine(Root,"cloud-game-discovery",hash+".json"))||!needed.Add(hash))return;DeviceEvent item;if(!graph.TryGetValue(hash,out item))throw new InvalidDataException("Cloud game metadata has an incomplete history. Sync and retry.");foreach(var parent in item.Parents)include(parent);};foreach(var head in heads)include(head.Hash());var headHashes=new HashSet<string>(heads.Select(h=>h.Hash()));var profiles=new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/devices/objects",limitSeconds:30,cancelled:()=>closing||closed);profiles.PushFiles(devices.Objects,needed.Where(h=>!headHashes.Contains(h)).Select(h=>h+".json"));profiles.PushFiles(devices.Objects,heads.Select(h=>h.Hash()+".json"));deviceViewCache=devices.Views().ToArray();
       }finally{Directory.Delete(outgoing,true);}
@@ -90,7 +87,7 @@ namespace PlaytimeRclone
    };
    link.Click+=async(_,e)=>{if(pendingKey!=null){await commit(pendingKey,GameLabel(pendingKey,name.Text));return;}if(!checkedCloud)return;var choice=list.SelectedItem as CloudGameChoice;if(choice!=null&&choice.Key!=null){await commit(choice.Key,choice.Name);return;}var label=name.Text.Trim();if(choices.Any(c=>String.Equals(c.Name,label,StringComparison.OrdinalIgnoreCase))){feedback.Text="This game is already in your cloud. Select it above to keep its progress.";return;}await commit(null,label);};
    window.ShowDialog();
-   if(repository.Snapshot().Mappings.ContainsKey(game.Id.ToString()))QueueSync();
+   if(repository.ReadMapping(game.Id.ToString())!=null)QueueGameSync(game.Id);
   }
  }
 }

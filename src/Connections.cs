@@ -19,19 +19,21 @@ namespace PlaytimeRclone
   }
   private string PreviousConnectionPath {get{return Path.Combine(Root,"previous-connection.json");}}
   private bool ConnectionChanged(SyncConfig next){return config==null||next.RemoteFolder!=config.RemoteFolder||next.ConfigFile!=config.ConfigFile||next.RcloneExe!=config.RcloneExe;}
-  private ConnectionVerification VerifyConnection(SyncConfig next)
+  private bool ConfirmLegacyConnection(SyncConfig next)
   {
-   var target=ConnectionProbe.Test(next);var expected=vault.State.ConnectionIdentity;
-   if(String.IsNullOrWhiteSpace(expected)&&!String.IsNullOrWhiteSpace(vault.State.Remote))
-   {
-    var previous=config;
-    if(previous==null||String.IsNullOrWhiteSpace(previous.RemoteFolder))previous=File.Exists(PreviousConnectionPath)?JsonSafety.Deserialize<SyncConfig>(File.ReadAllText(PreviousConnectionPath)):null;
-    if(previous!=null&&!String.IsNullOrWhiteSpace(previous.RemoteFolder))expected=ConnectionProbe.Test(previous).Identity;
-    if(String.IsNullOrWhiteSpace(expected))throw new InvalidOperationException("The previous vault cannot be identified safely. Reconnect the original configured remote first, then test its connection. Your history and current connection were kept.");
-   }
-   if(!String.IsNullOrWhiteSpace(vault.State.Remote)&&(String.IsNullOrWhiteSpace(target.Identity)||expected!=target.Identity))
-    throw new InvalidOperationException("This connection points to a different vault. Select the original Google account and vault folder. Reusing an OAuth JSON identifies the app, not the Google account. Use Switch vault / start fresh to intentionally change vaults. Your history and current connection were kept.");
-   return new ConnectionVerification{Identity=target.Identity,Previous=expected};
+   var remote=vault.State.Remote;
+   if(String.IsNullOrWhiteSpace(remote)||!String.IsNullOrWhiteSpace(vault.State.ConnectionIdentity))return false;
+   if(remote!=next.RemoteFolder.TrimEnd('/'))throw new InvalidOperationException("Verify the original configured remote before choosing a different remote for this older profile.");
+   if(PlayniteApi.Dialogs.ShowMessage(ConnectionProbe.LegacyConfirmation,"Verify original vault",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)throw new OperationCanceledException();
+   return true;
+  }
+  private ConnectionVerification VerifyConnection(SyncConfig next,bool confirmLegacy,Func<bool> cancelled=null)
+  {
+   var expected=vault.State.ConnectionIdentity;
+   if(!confirmLegacy&&String.IsNullOrWhiteSpace(expected)&&!String.IsNullOrWhiteSpace(vault.State.Remote))
+    throw new InvalidOperationException("Reconnect the original configured account and use Overview → Test connection to verify this older profile before changing its connection.");
+   var identity=ConnectionProbe.VerifyIdentity(next,expected,()=>closing||(cancelled!=null&&cancelled()));
+   return new ConnectionVerification{Identity=identity,Previous=confirmLegacy?identity:expected};
   }
   private void CommitConnection(SyncConfig next,ConnectionVerification proof)
   {
@@ -41,7 +43,7 @@ namespace PlaytimeRclone
    var oldRemote=vault.State.Remote;var oldIdentity=vault.State.ConnectionIdentity;
    try
    {
-    if(!String.IsNullOrWhiteSpace(next.RemoteFolder)){if(proof!=null)vault.PinVerified(next.RemoteFolder,proof.Identity,proof.Previous);else vault.Pin(next.RemoteFolder);}
+    if(proof!=null)vault.PinVerified(next.RemoteFolder,proof.Identity,proof.Previous);
     Atomic.Write(Path.Combine(Root,"rclone-settings.json"),JsonConvert.SerializeObject(next,Formatting.Indented));
    }
    catch{vault.State.Remote=oldRemote;vault.State.ConnectionIdentity=oldIdentity;vault.Save();throw;}
@@ -52,26 +54,28 @@ namespace PlaytimeRclone
    if(!EnsureAccess())throw new OperationCanceledException();
    if(syncing!=0)throw new InvalidOperationException("Stop the current transfer before changing storage.");
    ReportStatus("Testing the connection and verifying your vault…",SyncDisplayState.Working,"Testing connection");
-   var proof=await Task.Run(()=>VerifyConnection(next));
+   var confirmLegacy=ConfirmLegacyConnection(next);
+   var proof=await Task.Run(()=>VerifyConnection(next,confirmLegacy,()=>connectionCancelled));
    if(connectionCancelled)throw new OperationCanceledException("Connection cancelled. Your previous connection was kept.");
-   if(syncing!=0)throw new InvalidOperationException("A sync started while testing. Stop it, then retry. Your signed-in connection is saved locally.");
+   if(syncing!=0)throw new InvalidOperationException("A sync started while testing. Stop it, then retry your connection.");
    CommitConnection(next,proof);ReportStatus("Connected. Your cloud vault is ready. Continue setup when you are ready.",SyncDisplayState.Completed,"Connected");
   }
   private async void TestConnection(TextBlock feedback,Button button)
   {
    if(connectionTesting)return;
    if(String.IsNullOrWhiteSpace(config.RemoteFolder)){feedback.Text=ReportStatus("Choose a storage connection first.",SyncDisplayState.Ready,"Connect storage");return;}
-   var selected=config;connectionTesting=true;button.IsEnabled=false;feedback.Text=ReportStatus("Testing access to your cloud folder… No saves will be uploaded.",SyncDisplayState.Working,"Testing connection");
+   var legacy=!String.IsNullOrWhiteSpace(vault.State.Remote)&&String.IsNullOrWhiteSpace(vault.State.ConnectionIdentity);
+   if(legacy&&PlayniteApi.Dialogs.ShowMessage(ConnectionProbe.LegacyConfirmation,"Verify original vault",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;
+   if(!syncGate.Wait(0)){feedback.Text=ReportStatus("A sync is running. Test again when it finishes.",SyncDisplayState.Review,"Try again");return;}
+   var selected=config;var generation=System.Threading.Volatile.Read(ref transferGeneration);connectionTesting=true;button.IsEnabled=false;InterlockedSync(1);
+   feedback.Text=ReportStatus("Verifying your cloud vault. The first check may create its identity marker.",SyncDisplayState.Working,"Testing connection");
    try
    {
-    var result=await Task.Run(()=>ConnectionProbe.Test(selected));
-    if(config!=selected){feedback.Text=ReportStatus("The connection changed during the test. Test the current selection again.",SyncDisplayState.Review,"Test current connection");return;}
-    if(!String.IsNullOrWhiteSpace(result.Identity))
-    {if(!syncGate.Wait(0))throw new InvalidOperationException("A sync is running. Test again when it finishes.");try{vault.PinVerified(selected.RemoteFolder,result.Identity,String.IsNullOrWhiteSpace(vault.State.ConnectionIdentity)?result.Identity:vault.State.ConnectionIdentity);}finally{syncGate.Release();}}
-    feedback.Text=ReportStatus(result.Message,SyncDisplayState.Completed,"Connection verified");
+    await Task.Run(()=>ConnectionProbe.VerifyVault(vault,selected,()=>closing||vaultSwitchPending||generation!=System.Threading.Volatile.Read(ref transferGeneration),legacy));
+    feedback.Text=ReportStatus("The selected vault was verified.",SyncDisplayState.Completed,"Connection verified");
    }
    catch(Exception ex){feedback.Text=ReportStatus("Connection test failed: "+ex.Message,SyncDisplayState.Failed,"Connection test failed");}
-   finally{connectionTesting=false;button.IsEnabled=true;}
+   finally{InterlockedSync(0);syncGate.Release();connectionTesting=false;button.IsEnabled=true;}
   }
   private void ResetConnection()
   {

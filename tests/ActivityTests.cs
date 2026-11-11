@@ -48,6 +48,16 @@ static class ActivityTests
         Test("new history stays out of the legacy ledger namespace",()=>{using(var r=Repo()){new ActivityBridge(Dir()).Capture(r,game,History());var legacy=new Folder();var activity=new Folder();var engine=new SyncEngine();engine.Run(r,legacy,Dir());engine.Run(r,activity,Dir(),null,true);var old=SyncEngine.ReadObjects(legacy.Root);Equal(1,old.Count);Equal(true,old.All(e=>e.Version==1&&e.Kind=="baseline"&&!e.Count.HasValue));Equal(3,SyncEngine.ReadObjects(activity.Root).Count);}});
         Test("separate metadata areas converge counts and history repeatedly",()=>{using(var a=Repo())using(var b=Repo()){var sa=History();var sb=History();var ba=new ActivityBridge(Dir());var bb=new ActivityBridge(Dir());ba.Capture(a,game,sa);bb.Capture(b,game,sb);a.Start(game.ToString());a.Stop(game.ToString(),17);var legacy=new Folder();var activity=new Folder();var engine=new SyncEngine();for(int i=0;i<5;i++){engine.Run(a,legacy,Dir());engine.Run(a,activity,Dir(),null,true);engine.Run(b,legacy,Dir());engine.Run(b,activity,Dir(),null,true);bb.Capture(b,game,sb);bb.Project(b,game,sb);}Equal(77UL,new Ledger(b.Snapshot().Entries).Total(key));Equal(3UL,new Ledger(b.Snapshot().Entries).SessionCount(key));Equal(3,sb.Items.Count);}});
         Test("copied foreign native row with lost receipt cannot become a duplicate",()=>{using(var a=Repo())using(var b=Repo()){var store=History();var bridge=new ActivityBridge(Dir());bridge.Capture(b,game,store);a.Start(game.ToString());a.Stop(game.ToString(),17);b.Merge(a.Snapshot().Entries);var session=a.Snapshot().Entries.Single(e=>e.Kind=="session");store.Items.Add(new ActivitySession{Utc=DateTimeOffset.Parse(session.StartedUtc).UtcDateTime.AddMilliseconds(500),Seconds=17});Throws(()=>bridge.Capture(b,game,store));Equal(2,b.Snapshot().Entries.Count(e=>e.Kind=="history"));Equal(77UL,new Ledger(b.Snapshot().Entries).Total(key));}});
+        Test("indexed adoption rejects multiple candidates at the two-second boundary",()=>{
+            using(var r=Repo(0,0))
+            {
+                var now=new DateTime(2026,1,2,12,0,0,DateTimeKind.Utc);var device=r.Snapshot().Device;
+                r.Merge(new[]{-2,2}.Select(i=>new Entry{Kind="session",Id=Guid.NewGuid().ToString("N"),Game=key,Device=device,Seconds=3,
+                    StartedUtc=now.AddSeconds(i).ToString("O"),EndedUtc=now.AddSeconds(i+3).ToString("O")}));
+                var store=new Store{Items=new List<ActivitySession>{new ActivitySession{Utc=now,Seconds=3}}};
+                Throws(()=>new ActivityBridge(Dir()).Capture(r,game,store));Equal(0,r.Snapshot().Entries.Count(e=>e.Kind=="history"));
+            }
+        });
         Console.WriteLine("RESULT "+passed+" passed, "+failed+" failed");return failed==0?0:1;
     }
 }

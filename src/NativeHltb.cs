@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -60,7 +61,7 @@ namespace PlaytimeRclone
             {view.Navigate("https://howlongtobeat.com/login");view.OpenDialog();}
             hltbRetryAfter=DateTime.MinValue;QueueSync();
         }
-        private async Task SyncNativeHltb()
+        private async Task SyncNativeHltb(KeyValuePair<string,Mapping>[] mappings)
         {
             // Playnite owns the persistent browser cookie jar. No passwords, cookies
             // or account identifiers enter Link's cloud, setup bundles or diagnostics.
@@ -80,7 +81,7 @@ namespace PlaytimeRclone
             var query=new JObject{{"user_id",account},{"lists",new JArray("playing","backlog","replays","custom","custom2","custom3","completed","retired")},{"set_playstyle","comp_all"},{"name",""},{"platform",""},{"storefront",""},{"sortBy",""},{"sortFlip",0},{"view",""},{"random",0},{"limit",5000},{"currentUserHome",true}};
             var catalog=JsonSafety.Object(await request("/api/user/"+account+"/games/list",query));var entries=catalog.SelectToken("data.gamesList") as JArray;if(entries==null)throw new IOException("HLTB library format changed. Progress remains queued.");
             if(hltbProgress==null)hltbProgress=new HltbProgress(Root);int pending=0;
-            foreach(var pair in repository.Snapshot().Mappings)
+            foreach(var pair in mappings)
             {
                 if(closing||transferCancelled)return;
                 var game=UI(()=>PlayniteApi.Database.Games.Get(new Guid(pair.Key)));if(game==null||game.IsRunning||game.IsLaunching)continue;

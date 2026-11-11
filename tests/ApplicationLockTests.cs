@@ -28,6 +28,54 @@ internal static class ApplicationLockTests
             var surface=new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.DarkSlateBlue);app.Resources["ControlBackgroundBrush"]=surface;
             foreach(var pair in new[]{new object[]{"Canvas",dark},new object[]{"Surface",surface}}){var property=typeof(PlaytimePlugin).GetProperty((string)pair[0],System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);True(Object.ReferenceEquals(property.GetValue(null,null),pair[1]));}
         });
+        Test("Steam and Epic default to launcher-owned saves with an explicit local override",()=>{
+            var steam=new Playnite.SDK.Models.Game{PluginId=new Guid("cb91dfc9-b977-43bf-8e70-55f46e410fab")};
+            var epic=new Playnite.SDK.Models.Game{PluginId=new Guid("00000002-dbd1-46c6-b5d0-b1ba559d10e4")};
+            var manual=new Playnite.SDK.Models.Game();
+            var legacy=new SaveLink{Folder=@"C:\fixture"};
+            True(!SaveCloudOwnership.CanSync(steam,legacy)&&!SaveCloudOwnership.CanSync(epic,legacy));
+            True(SaveCloudOwnership.CanSync(manual,legacy));
+            manual.GameActions=new System.Collections.ObjectModel.ObservableCollection<Playnite.SDK.Models.GameAction>{
+                new Playnite.SDK.Models.GameAction{Path="steam://rungameid/123"}
+            };
+            True(!SaveCloudOwnership.CanSync(manual,legacy));
+            legacy.LinkManagesSaves=true;
+            True(SaveCloudOwnership.CanSync(steam,legacy)&&SaveCloudOwnership.CanSync(epic,legacy));
+            legacy.LinkManagesSaves=false;
+            True(!SaveCloudOwnership.CanSync(new Playnite.SDK.Models.Game(),legacy));
+        });
+        Test("game card cloud badge follows recycled game context and opens only that game",()=>{
+            var linked=new Playnite.SDK.Models.Game{Id=Guid.NewGuid(),Name="Linked fixture"};
+            var unrelated=new Playnite.SDK.Models.Game{Id=Guid.NewGuid(),Name="Unlinked fixture"};
+            Guid opened=Guid.Empty;int clicks=0;
+            var state=SaveBadgeState.Ready;
+            var badge=new CloudGameBadge(game=>game.Id==linked.Id?state:SaveBadgeState.Hidden,game=>{opened=game.Id;clicks++;});
+            True(badge.Visibility==Visibility.Collapsed);
+            badge.GameContext=linked;True(badge.Visibility==Visibility.Visible);
+            var button=(Button)badge.Content;
+            var icon=(StackPanel)button.Content;
+            var glyph=(TextBlock)icon.Children[0];
+            var marker=(TextBlock)icon.Children[1];
+            System.Windows.Media.GlyphTypeface face;
+            True(new System.Windows.Media.Typeface(glyph.FontFamily,System.Windows.FontStyles.Normal,System.Windows.FontWeights.Normal,System.Windows.FontStretches.Normal).TryGetGlyphTypeface(out face));
+            True(face.CharacterToGlyphMap.ContainsKey(0xE753));
+            state=SaveBadgeState.Checking;badge.Refresh();
+            True(marker.Text=="↻"&&((string)button.ToolTip).Contains("Checking"));
+            state=SaveBadgeState.Checked;badge.Refresh();
+            True(((string)button.ToolTip).Contains("Launch save check finished"));
+            state=SaveBadgeState.Confirmed;badge.Refresh();
+            True(marker.Text=="✓"&&((string)button.ToolTip).Contains("Last save sync confirmed"));
+            state=SaveBadgeState.Failed;badge.Refresh();
+            True(marker.Text=="!"&&((string)button.ToolTip).Contains("Could not"));
+            state=SaveBadgeState.Paused;badge.Refresh();
+            True(((string)button.ToolTip).Contains("paused"));
+            badge.GameContext=unrelated;True(badge.Visibility==Visibility.Collapsed);
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));True(clicks==0);
+            badge.GameContext=linked;button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            True(clicks==1&&opened==linked.Id);
+            badge.GameContext=null;True(badge.Visibility==Visibility.Collapsed);
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));True(clicks==1);
+        });
         var library=new Window{Title="Synthetic library",Width=400,Height=300,Opacity=0.8};library.Show();
         var settings=new Window{Title="Synthetic settings",Width=300,Height=250,IsEnabled=false};settings.Show();int quit=0;
         PasswordBox input=null;

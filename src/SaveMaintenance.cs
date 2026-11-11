@@ -71,7 +71,7 @@ namespace PlaytimeRclone
             try
             {
                 StopTransfer();Network("Verifying and erasing the selected vault…",()=>{CheckActiveGameVault(config);VaultMaintenance.Purge(config);});
-                PlayniteApi.Dialogs.ShowMessage("Cloud vault erased. Sync stays paused. Local history can be uploaded again if you resume; use Switch vault / start fresh for a new empty profile.","Playnite Link");
+                PlayniteApi.Dialogs.ShowMessage("Cloud vault erased. The vault identity marker is retained when needed. Sync stays paused. Local history can be uploaded again if you resume; use Switch vault / start fresh for a new empty profile.","Playnite Link");
             }
             finally
             {

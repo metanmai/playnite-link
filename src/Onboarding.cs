@@ -11,7 +11,9 @@ using Playnite.SDK.Models;
 
 namespace PlaytimeRclone
 {
-    public sealed class OnboardingOptions {public bool AutomaticGames;public bool OnlineHltb;public bool SetupComplete;public int SetupStep;public bool SyncPaused;public bool SyncAchievements=true;}
+    public sealed class OnboardingOptions {public bool AutomaticGames;public bool OnlineHltb;public bool SetupComplete;public int SetupStep;public bool SyncPaused;public bool SyncAchievements=true;
+        internal OnboardingOptions Copy(){return (OnboardingOptions)MemberwiseClone();}
+    }
     public sealed partial class PlaytimePlugin
     {
         private OnboardingOptions onboarding;

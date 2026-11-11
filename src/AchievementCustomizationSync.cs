@@ -15,7 +15,6 @@ namespace PlaytimeRclone
         Vault achievementCustomVault;
         readonly Dictionary<string,SortedDictionary<string,string>> capturedAchievementCustomizations=new Dictionary<string,SortedDictionary<string,string>>();
         Vault AchievementCustomVault{get{return achievementCustomVault??(achievementCustomVault=new Vault(Path.Combine(Root,"achievement-customization-vault")));}}
-        object EngineCustomData{get{return achievementEngine==null?null:PluginActivityStore.Member(achievementEngine,"GameCustomDataStore");}}
         Checkpoint AchievementCustomCheckpoint(string key)
         {
             SaveLink link;if(!AchievementCustomVault.State.Links.TryGetValue(key,out link)){link=new SaveLink();AchievementCustomVault.State.Links.Add(key,link);AchievementCustomVault.Save();}return link.Save;
@@ -31,22 +30,29 @@ namespace PlaytimeRclone
         }
         SortedDictionary<string,string> CaptureAchievementCustomization(Game game)
         {
-            var store=EngineCustomData;var result=new SortedDictionary<string,string>(StringComparer.Ordinal);if(store==null)return result;
-            var raw=PluginActivityStore.Call(store,"LoadOrDefault",game.Id);if(raw==null)return result;
+            CheckTransfer();
+            var id=game.Id;
+            var version=CustomDataVersion(id);
+            var store=achievementCustomDataStore;var result=new SortedDictionary<string,string>(StringComparer.Ordinal);if(store==null)return result;
+            // LoadOrDefault returns a detached clone from the engine's locked store.
+            var raw=PluginActivityStore.Call(store,"LoadOrDefault",id);if(raw==null)return result;
             var temp=Path.Combine(Root,"scratch","achievement-"+Guid.NewGuid().ToString("N")+".pa.zip");Directory.CreateDirectory(Path.GetDirectoryName(temp));
             try
             {
-                if(Convert.ToBoolean(PluginActivityStore.Call(store,"HasPortableData",game.Id)))
+                if(Convert.ToBoolean(PluginActivityStore.Call(store,"HasPortableData",id)))
                 {
-                    PluginActivityStore.Call(store,"ExportPortablePackage",game.Id,temp);
+                    // The standalone add-on may resolve game metadata through Playnite's UI API.
+                    UI(()=>PluginActivityStore.Call(store,"ExportPortablePackage",id,temp));
+                    CheckTransfer();
                     using(var stream=File.OpenRead(temp))using(var zip=new ZipArchive(stream,ZipArchiveMode.Read))foreach(var entry in zip.Entries)
                     {
+                        CheckTransfer();
                         if(entry.Length==0&&entry.FullName.EndsWith("/",StringComparison.Ordinal))continue;
                         using(var input=entry.Open())
                         {
                             if(entry.FullName=="custom-data.pa")
                             {
-                                if(entry.Length>16*1024*1024)throw new IOException("Achievement customization manifest is too large.");JObject manifest;using(var reader=new StreamReader(input))manifest=JsonSafety.Object(reader.ReadToEnd());manifest["PlayniteGameId"]=Guid.Empty.ToString();manifest.Remove("GameKeys");
+                                if(entry.Length>AchievementCustomizationPayload.ManifestBytes)throw new IOException("Achievement customization manifest is too large.");JObject manifest;using(var reader=new StreamReader(input))manifest=JsonSafety.Object(reader.ReadToEnd());manifest["PlayniteGameId"]=Guid.Empty.ToString();manifest.Remove("GameKeys");
                                 using(var bytes=new MemoryStream(System.Text.Encoding.UTF8.GetBytes(manifest.ToString(Formatting.None))))result.Add(entry.FullName,blobs.Put(bytes).ToString());
                             }
                             else result.Add(entry.FullName,blobs.Put(input).ToString());
@@ -56,26 +62,20 @@ namespace PlaytimeRclone
                 var personal=PersonalAchievementState(raw);
                 var hasPersonal=((JArray)personal["GoalAchievementApiNames"]).Count>0||((JArray)personal["CustomAchievements"]).Count>0||personal["ManualLink"]!=null||((JObject)personal["AchievementOverrides"]).Count>0;
                 if(hasPersonal)using(var bytes=new MemoryStream(System.Text.Encoding.UTF8.GetBytes(personal.ToString(Formatting.None))))result.Add("link-personal-state.json",blobs.Put(bytes).ToString());
-                SaveFiles.Validate(result);return result;
+                if(version!=CustomDataVersion(id))throw new IOException("Achievement customizations changed during export; retrying preserves the edit.");
+                AchievementCustomizationPayload.Validate(result);return result;
             }
             finally{if(File.Exists(temp))File.Delete(temp);}
         }
-        void ApplyAchievementCustomization(Game game,SortedDictionary<string,string> data)
+        void ApplyAchievementCustomization(Game game,bool hasManifest,string package,JObject personal)
         {
-            SaveFiles.Validate(data);blobs.Ensure(data);var store=EngineCustomData;if(store==null)throw new IOException("Built-in achievement data store is not ready.");
+            var store=achievementCustomDataStore;if(store==null)throw new IOException("The Playnite Achievements customization interface is unavailable.");
             var previous=PluginActivityStore.Call(store,"LoadOrDefault",game.Id);var previousCopy=JObject.FromObject(previous).ToObject(previous.GetType());
-            var temp=Path.Combine(Root,"scratch","achievement-apply-"+Guid.NewGuid().ToString("N")+".pa.zip");Directory.CreateDirectory(Path.GetDirectoryName(temp));
             try
             {
-                if(data.ContainsKey("custom-data.pa"))
-                {
-                    using(var stream=File.Create(temp))using(var zip=new ZipArchive(stream,ZipArchiveMode.Create))foreach(var pair in data.Where(p=>p.Key!="link-personal-state.json"))using(var output=zip.CreateEntry(pair.Key).Open())blobs.CopyVerified(pair.Value,output);
-                    PluginActivityStore.Call(store,"ImportReplacePortable",game.Id,temp);
-                }
+                if(hasManifest)PluginActivityStore.Call(store,"ImportReplacePortable",game.Id,package);
                 var current=PluginActivityStore.Call(store,"LoadOrDefault",game.Id);var raw=JObject.FromObject(current);
-                if(!data.ContainsKey("custom-data.pa")){var reset=JObject.FromObject(Activator.CreateInstance(current.GetType()));foreach(var field in new[]{"ExcludedFromRefreshes","ExcludedFromSummaries","RuleClaims","UserPinnedFields","UnlockSounds","NotificationBehaviorOverride","CaptureOverride"})if(raw[field]!=null)reset[field]=raw[field].DeepClone();raw=reset;}
-                var personal=data.ContainsKey("link-personal-state.json")?JsonSafety.Object(System.Text.Encoding.UTF8.GetString(blobs.ReadSmall(data["link-personal-state.json"]))):new JObject();
-                if(personal.Properties().Any(p=>!new[]{"GoalAchievementApiNames","CustomAchievements","ManualLink","AchievementOverrides"}.Contains(p.Name)))throw new IOException("Unexpected personal achievement fields.");
+                if(!hasManifest){var reset=JObject.FromObject(Activator.CreateInstance(current.GetType()));foreach(var field in new[]{"ExcludedFromRefreshes","ExcludedFromSummaries","RuleClaims","UserPinnedFields","UnlockSounds","NotificationBehaviorOverride","CaptureOverride"})if(raw[field]!=null)reset[field]=raw[field].DeepClone();raw=reset;}
                 raw["GoalAchievementApiNames"]=personal["GoalAchievementApiNames"] as JArray??new JArray();
                 foreach(var item in raw["CustomAchievements"] as JArray??new JArray())
                 {
@@ -86,34 +86,49 @@ namespace PlaytimeRclone
                 raw["PlayniteGameId"]=game.Id.ToString();PluginActivityStore.Call(store,"Save",game.Id,raw.ToObject(current.GetType()));
             }
             catch{PluginActivityStore.Call(store,"Save",game.Id,previousCopy);throw;}
-            finally{if(File.Exists(temp))File.Delete(temp);}
         }
-        async Task CaptureAchievementCustomizations()
+        async Task CaptureAchievementCustomizations(KeyValuePair<string,Mapping>[] mappings)
         {
-            capturedAchievementCustomizations.Clear();if(!onboarding.SyncAchievements||EngineCustomData==null)return;
-            foreach(var pair in repository.Snapshot().Mappings)
+            capturedAchievementCustomizations.Clear();if(!onboarding.SyncAchievements||achievementCustomDataStore==null)return;
+            foreach(var pair in mappings)
             {
                 CheckTransfer();var game=UI(()=>PlayniteApi.Database.Games.Get(new Guid(pair.Key)));if(game==null||UI(()=>GameBusy(game.Id)))continue;
                 try
                 {
-                    var data=UI(()=>CaptureAchievementCustomization(game));capturedAchievementCustomizations[pair.Value.Key]=data;var checkpoint=AchievementCustomCheckpoint(pair.Value.Key);var hash=Revision.ContentHashOf(data);
+                    var data=CaptureAchievementCustomization(game);capturedAchievementCustomizations[pair.Value.Key]=data;var checkpoint=AchievementCustomCheckpoint(pair.Value.Key);var hash=Revision.ContentHashOf(data);
                     if(checkpoint.Revision!=null&&checkpoint.Content!=hash){var revision=new Revision{Version=2,Game=pair.Value.Key,Kind="save",Device=repository.Snapshot().Device,Parents=new List<string>{checkpoint.Revision},Data=data};AchievementCustomVault.Add(revision);checkpoint.Revision=revision.Hash();checkpoint.Content=hash;AchievementCustomVault.Save();}
                 }
+                catch(OperationCanceledException){throw;}
                 catch(Exception ex){achievementSyncPending=true;achievementStatus="Achievement customization capture is pending; originals are preserved.";logger.Warn(ex,"Achievement customization capture deferred.");}
                 await Task.Delay(1);
             }
         }
-        async Task SyncAchievementCustomizations(string metadataCache,bool interactive)
+        async Task SyncAchievementCustomizations(string metadataCache,bool interactive,KeyValuePair<string,Mapping>[] mappings,ISet<string> games)
         {
-            if(!onboarding.SyncAchievements||EngineCustomData==null)return;
+            if(!onboarding.SyncAchievements||achievementCustomDataStore==null)return;
+            var transport=new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||TransferStopped);
             AchievementCustomVault.Import(Path.Combine(metadataCache,"achievement-customizations","objects"));
-            foreach(var pair in repository.Snapshot().Mappings)
+            foreach(var pair in mappings)
             {
                 CheckTransfer();SortedDictionary<string,string> local;if(!capturedAchievementCustomizations.TryGetValue(pair.Value.Key,out local))continue;var game=UI(()=>PlayniteApi.Database.Games.Get(new Guid(pair.Key)));if(game==null||UI(()=>GameBusy(game.Id)))continue;
-                var checkpoint=AchievementCustomCheckpoint(pair.Value.Key);if(local.Count==0&&checkpoint.Revision==null&&AchievementCustomVault.Heads(pair.Value.Key,"save").Count==0)continue;if(UI(()=>Revision.ContentHashOf(CaptureAchievementCustomization(game)))!=Revision.ContentHashOf(local)){achievementSyncPending=true;continue;}var result=AchievementCustomVault.Reconcile(pair.Value.Key,"save",repository.Snapshot().Device,local,checkpoint,conflict=>interactive?UI(()=>ChooseAchievementCustomization(game,conflict)):"cancel",data=>{blobs.Ensure(data);UI(()=>ApplyAchievementCustomization(game,data));});
+                var checkpoint=AchievementCustomCheckpoint(pair.Value.Key);if(local.Count==0&&checkpoint.Revision==null&&AchievementCustomVault.Heads(pair.Value.Key,"save").Count==0)continue;var version=CustomDataVersion(game.Id);if(Revision.ContentHashOf(CaptureAchievementCustomization(game))!=Revision.ContentHashOf(local)){achievementSyncPending=true;continue;}var result=AchievementCustomVault.Reconcile(pair.Value.Key,"save",repository.Snapshot().Device,local,checkpoint,conflict=>interactive?UI(()=>ChooseAchievementCustomization(game,conflict)):"cancel",data=>{
+                    var temp=Path.Combine(Root,"scratch","achievement-apply-"+Guid.NewGuid().ToString("N")+".pa.zip");Directory.CreateDirectory(Path.GetDirectoryName(temp));
+                    try
+                    {
+                        var personal=AchievementCustomizationPayload.Prepare(data,blobs,transport.FetchBoundedBlob,temp);
+                        CheckTransfer();
+                        UI(()=>{
+                            CheckTransfer();
+                            if(GameBusy(game.Id)||version!=CustomDataVersion(game.Id))
+                                throw new IOException("Achievement customizations changed while preparing the replacement; retrying preserves the edit.");
+                            ApplyAchievementCustomization(game,data.ContainsKey(AchievementCustomizationPayload.Manifest),temp,personal);
+                        });
+                    }
+                    finally{if(File.Exists(temp))File.Delete(temp);}
+                });
                 if(result.Cancelled){achievementSyncPending=true;achievementStatus="Achievement customization versions need review. Both versions are preserved.";}await Task.Delay(1);
             }
-            var incoming=Path.Combine(metadataCache,"achievement-customizations","objects");var revisions=AchievementCustomVault.Read(AchievementCustomVault.Objects).Where(r=>!File.Exists(Path.Combine(incoming,r.Key+".json"))).ToDictionary(r=>r.Key,r=>r.Value);var blobNames=revisions.Values.SelectMany(r=>r.Data.Values).Distinct().Select(r=>BlobReference.Parse(r).Hash+".blob");
+            var incoming=Path.Combine(metadataCache,"achievement-customizations","objects");var revisions=AchievementCustomVault.Read(AchievementCustomVault.Objects).Where(r=>(games==null||games.Contains(r.Value.Game))&&!File.Exists(Path.Combine(incoming,r.Key+".json"))).ToDictionary(r=>r.Key,r=>r.Value);var blobNames=revisions.Values.SelectMany(r=>r.Data.Values).Distinct().Select(r=>BlobReference.Parse(r).Hash+".blob");
             new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/blobs","*.blob",86400,devicePreferences.BandwidthKiB,()=>closing||TransferStopped).PushFiles(blobs.DirectoryPath,blobNames);
             new RcloneTransport(config.RcloneExe,config.ConfigFile,config.RemoteFolder,"playnite-link-v1/achievement-customizations/objects",cancelled:()=>closing||TransferStopped).PushFiles(AchievementCustomVault.Objects,revisions.Keys.Select(r=>r+".json"));
         }

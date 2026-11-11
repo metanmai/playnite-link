@@ -214,7 +214,7 @@ namespace PlaytimeRclone
         }
         private void VerifyGameCloud(Game game,string key)
         {
-            if(String.IsNullOrWhiteSpace(config.RemoteFolder))throw new IOException("Connect cloud storage first.");CheckActiveGameVault(config);
+            if(String.IsNullOrWhiteSpace(config.RemoteFolder))throw new IOException("Connect cloud storage first.");CheckActiveGameVault(config,()=>closing||TransferStopped);
             var data=new SortedDictionary<string,string>(StringComparer.Ordinal);int index=0;
             foreach(var head in vault.Heads(key,"save"))foreach(var reference in head.Data.Values.Where(v=>v.StartsWith("blob:",StringComparison.Ordinal)))data[(++index).ToString()]=reference;
             foreach(var backup in CloudBackups.Heads(key).Where(b=>!b.Deleted))data[(++index).ToString()]=backup.Archive;

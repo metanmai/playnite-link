@@ -10,7 +10,7 @@ namespace PlaytimeRclone
  {
   private readonly SyncProgress syncProgress=new SyncProgress();
   private string ReportStatus(string message,SyncDisplayState state=SyncDisplayState.Ready,string title=null,int current=0,int total=0)
-  {status=message;syncProgress.Report(state,title??state.ToString(),message,current,total);return message;}
+  {status=message;syncProgress.Report(state,title??state.ToString(),message,current,total);RefreshCloudBadges();return message;}
   private TextBlock SyncStatusView(Panel parent)
   {
    var panel=new StackPanel{Margin=new Thickness(0,8,0,10)};parent.Children.Add(panel);

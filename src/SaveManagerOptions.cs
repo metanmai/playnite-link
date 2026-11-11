@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Playnite.SDK;
@@ -95,7 +97,7 @@ namespace PlaytimeRclone
         }
         void OfferReinstallRestore(Game game)
         {
-            Mapping map;SaveLink link;if(!repository.Snapshot().Mappings.TryGetValue(game.Id.ToString(),out map)||!vault.State.Links.TryGetValue(map.Key,out link)||!link.RestoreOnInstall||!link.HasSaves)return;
+            Mapping map;SaveLink link;if(!repository.Snapshot().Mappings.TryGetValue(game.Id.ToString(),out map)||!vault.State.Links.TryGetValue(map.Key,out link)||!link.RestoreOnInstall||!SaveCloudOwnership.CanSync(game,link))return;
             PlayniteApi.Notifications.Add(new NotificationMessage("PlayniteLink.Reinstalled."+game.Id,"Game reinstalled: review saved backups for "+game.Name,NotificationType.Info,()=>Guard(()=>ShowSaveManager(game,map.Key))));
         }
         public override void OnGameInstalled(OnGameInstalledEventArgs args)
@@ -105,11 +107,18 @@ namespace PlaytimeRclone
         public override IEnumerable<SidebarItem> GetSidebarItems()
         {
             if(repository==null)return new SidebarItem[0];
-            var items=new List<SidebarItem>{new SidebarItem{Title="Playnite Link",Icon="\uE71B",Type=SiderbarItemType.View,Opened=CreateLinkSidebarView}};
+            var items = new List<SidebarItem> {
+                new SidebarItem {
+                    Title = "Playnite Link",
+                    Icon = new TextBlock { Text = "\uE753", FontFamily = new FontFamily("Segoe MDL2 Assets") },
+                    Type = SiderbarItemType.View,
+                    Opened = CreateLinkSidebarView
+                }
+            };
             if(ManagerOptions.ShowSidebar)items.Add(new SidebarItem{Title="Playnite Link saves",Icon="\uE8B7",Type=SiderbarItemType.Button,Activated=()=>Guard(()=>{
                 var selected=PlayniteApi.MainView.SelectedGames.ToList();if(selected.Count==1){Mapping map;if(repository.Snapshot().Mappings.TryGetValue(selected[0].Id.ToString(),out map))ShowSaveManager(selected[0],map.Key);else Enroll(selected[0]);}else ManageGames();
             })});
-            items.AddRange(AchievementSidebarItems());return items;
+            return items;
         }
         async void QuickBackup(IEnumerable<Game> games)
         {

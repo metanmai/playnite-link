@@ -1,4 +1,4 @@
-param([string]$BuildDirectory,[string]$OutputDirectory)
+param([string]$BuildDirectory,[string]$OutputDirectory,[Parameter(Mandatory=$true)][string]$AchievementAddonPackage)
 $ErrorActionPreference='Stop'
 if(!$BuildDirectory -or !$OutputDirectory){throw 'Supply a tested build and a new local evidence directory'}
 if(Test-Path -LiteralPath $OutputDirectory){throw 'Choose a fresh evidence directory'}
@@ -6,7 +6,7 @@ New-Item -ItemType Directory -Path $OutputDirectory|Out-Null
 $cloud=Join-Path $OutputDirectory 'cloud'
 $results=@();$author=$null
 foreach($phase in @('author','receive')){
- $output=& (Join-Path $PSScriptRoot 'Run-HostProbe.ps1') -SkipBuild -BuildDirectory $BuildDirectory -AchievementPeer -AchievementPhase $phase -SharedAchievementCloud $cloud
+ $output=& (Join-Path $PSScriptRoot 'Run-HostProbe.ps1') -SkipBuild -SkipEvidenceCopy -BuildDirectory $BuildDirectory -AchievementPeer -AchievementPhase $phase -SharedAchievementCloud $cloud -AchievementAddonPackage $AchievementAddonPackage
  $output|Write-Output
  $line=$output|Where-Object{$_ -like 'Isolated lab retained at *'}|Select-Object -Last 1
  if(!$line){throw 'Peer profile was not returned'}
@@ -14,7 +14,7 @@ foreach($phase in @('author','receive')){
  $result=Get-Content (Join-Path $profile 'host-result.json') -Raw|ConvertFrom-Json
  if(!$result.passed){throw 'Peer failed'}
  Copy-Item (Join-Path $profile 'host-result.json') (Join-Path $OutputDirectory ($phase+'.json'))
- $results+= $result|Select-Object passed,phase,checks,localGameId,cloudGameKey,device,engineBuiltIn
+ $results+= $result|Select-Object passed,phase,checks,localGameId,cloudGameKey,device,standaloneAddon
  if($phase -eq 'author'){$author=$lab}
 }
 $profile=Join-Path $author 'profile';$resultPath=Join-Path $profile 'host-result.json'
@@ -28,6 +28,6 @@ if(!(Test-Path -LiteralPath $resultPath)){throw 'Returning peer produced no resu
 $result=Get-Content -LiteralPath $resultPath -Raw|ConvertFrom-Json
 if(!$result.passed){throw ($result|ConvertTo-Json)}
 Copy-Item -LiteralPath $resultPath -Destination (Join-Path $OutputDirectory 'verify.json')
-$results+=$result|Select-Object passed,phase,checks,localGameId,cloudGameKey,device,engineBuiltIn
+$results+=$result|Select-Object passed,phase,checks,localGameId,cloudGameKey,device,standaloneAddon
 $results|ConvertTo-Json|Set-Content (Join-Path $OutputDirectory 'results.json')
 $results|ConvertTo-Json|Write-Output

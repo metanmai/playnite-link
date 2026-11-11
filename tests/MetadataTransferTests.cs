@@ -11,6 +11,25 @@ class MetadataTransferTests
  Test("invalid cached records are preserved in quarantine for redownload",()=>{var p=Path.Combine(root,"invalid");var dir=Path.Combine(p,"ledger","objects");Directory.CreateDirectory(dir);File.WriteAllText(Path.Combine(dir,new string('a',64)+".json"),"bad-json");Check(MetadataCache.Validate(p)==1);Check(MetadataCache.Count(p)==0);Check(Directory.GetFiles(Path.Combine(p,"invalid-cache")).Length==1);});
  Test("valid immutable cache survives verification unchanged",()=>{var p=Path.Combine(root,"valid");var dir=Path.Combine(p,"ledger","objects");Directory.CreateDirectory(dir);var e=new Entry{Kind="baseline",Id=Guid.NewGuid().ToString("N"),Game=Identity.Hash("manual:test"),Device=Guid.NewGuid().ToString("N"),Seconds=10,StartedUtc="2026-01-01T00:00:00Z",EndedUtc="2026-01-01T00:00:00Z"};var file=Path.Combine(dir,e.Hash()+".json");File.WriteAllText(file,e.Canonical());var time=File.GetLastWriteTimeUtc(file);Check(MetadataCache.Validate(p)==0);Check(MetadataCache.Count(p)==1);Check(File.GetLastWriteTimeUtc(file)==time);});
  Test("real Rclone repairs a damaged cache and leaves cloud unchanged",()=>{var p=Path.Combine(root,"real");var cloud=Path.Combine(p,"cloud");var source=Path.Combine(cloud,"playnite-link-v1","ledger","objects");Directory.CreateDirectory(source);var e=new Entry{Kind="baseline",Id=Guid.NewGuid().ToString("N"),Game=Identity.Hash("manual:test"),Device=Guid.NewGuid().ToString("N"),Seconds=7,StartedUtc="2026-01-01T00:00:00Z",EndedUtc="2026-01-01T00:00:00Z"};File.WriteAllText(Path.Combine(source,e.Hash()+".json"),e.Canonical());var cache=Path.Combine(p,"cache");var destination=Path.Combine(cache,"ledger","objects");Directory.CreateDirectory(destination);File.WriteAllText(Path.Combine(destination,e.Hash()+".json"),"broken");var cfg=Path.Combine(p,"rclone.conf");File.WriteAllText(cfg,"[test]\ntype = alias\nremote = "+cloud+"\n");var transfer=new RcloneTransport(args[1],cfg,"test:","playnite-link-v1");transfer.PullMetadata(cache);Check(File.ReadAllText(Path.Combine(destination,e.Hash()+".json"))==e.Canonical());var modified=File.GetLastWriteTimeUtc(Path.Combine(destination,e.Hash()+".json"));transfer.PullMetadata(cache);Check(File.GetLastWriteTimeUtc(Path.Combine(destination,e.Hash()+".json"))==modified);Check(Directory.GetFiles(source,"*.json").Length==1);});
+ Test("warm validation skips unchanged payloads and catches same-length edits with restored write time",()=>{
+  var fixture=Path.Combine(root,"real");var path=Path.Combine(fixture,"cache");var cache=new MetadataValidationCache();
+  var transport=new RcloneTransport(args[1],Path.Combine(fixture,"rclone.conf"),"test:","playnite-link-v1");
+  transport.PullMetadata(path,validation:cache);var parsed=cache.ParsedObjects;Check(parsed==1);
+  transport.PullMetadata(path,validation:cache);Check(cache.ParsedObjects==parsed);
+  var file=Directory.GetFiles(Path.Combine(path,"ledger","objects"),"*.json").Single();
+  var original=File.ReadAllText(file);var modified=File.GetLastWriteTimeUtc(file);
+  File.WriteAllText(file,new string('x',original.Length));File.SetLastWriteTimeUtc(file,modified);
+  transport.PullMetadata(path,validation:cache);
+  Check(cache.ParsedObjects==parsed+1);Check(File.ReadAllText(file)==original);
+  Console.WriteLine("Warm pass reparsed 0 payloads; a same-length rewrite with restored write time was quarantined and refetched.");
+ });
+ Test("pre-launch metadata pull skips unrelated transfer areas",()=>{
+  var cache=Path.Combine(root,"pre-launch");var fixture=Path.Combine(root,"real");
+  var ledger=Path.Combine(cache,"ledger","objects");Directory.CreateDirectory(ledger);
+  var unrelated=Path.Combine(ledger,new string('a',64)+".json");File.WriteAllText(unrelated,"unrelated work");
+  new RcloneTransport(args[1],Path.Combine(fixture,"rclone.conf"),"test:","playnite-link-v1").PullMetadata(cache,new[]{"devices","revisions"});
+  Check(File.ReadAllText(unrelated)=="unrelated work");Check(Directory.GetFiles(ledger,"*.json").Length==1);
+ });
  Test("cache seeding copies verified objects and preserves source and local mappings",()=>{var source=Path.Combine(root,"valid");var target=Path.Combine(root,"seeded");Check(MetadataCache.Seed(source,target)==1);Check(MetadataCache.Count(target)==1);Check(MetadataCache.Count(source)==1);Check(!File.Exists(Path.Combine(target,"state.json")));Check(MetadataCache.Seed(source,target)==0);});
  Test("simulated quota and rejected credentials preserve queued objects for immutable retry",()=>{
   foreach(var mode in new[]{"quota","authentication"}){

@@ -34,6 +34,20 @@ internal static class StreamingTests
         Test("unchanged files deduplicate across paths and revisions",()=>{var store=new BlobStore(Dir());var saves=Dir();File.WriteAllText(Path.Combine(saves,"a"),"same");File.WriteAllText(Path.Combine(saves,"b"),"same");var first=store.Capture(saves);var second=store.Capture(saves);Equal(first["a"],first["b"]);Equal(Revision.ContentHashOf(first),Revision.ContentHashOf(second));Equal(1,Directory.GetFiles(store.DirectoryPath,"*.blob").Length);});
         Test("capture more than the old 4096 file limit",()=>{var store=new BlobStore(Dir());var saves=Dir();for(int i=0;i<4100;i++)File.WriteAllText(Path.Combine(saves,i+".sav"),"");Equal(4100,store.Capture(saves).Count);Equal(1,Directory.GetFiles(store.DirectoryPath,"*.blob").Length);});
         Test("blob manifests reject path traversal and negative sizes",()=>{Throws(()=>BlobReference.Parse("blob:"+new string('a',64)+":-1"));Throws(()=>BlobReference.Parse("blob:../escape:5"));});
+        Test("unchanged save checks reuse source hashes and verified blobs within the cycle",()=>{
+            var store=new BlobStore(Dir());var saves=Dir();var path=Path.Combine(saves,"slot");File.WriteAllText(path,"original");
+            store.Capture(saves);
+            var cycle=new SaveCaptureCache();
+            for(int i=0;i<3;i++)store.Capture(saves,cycle);
+            Equal(1,cycle.SourceReads);Equal(1,cycle.BlobVerifications);
+            Console.WriteLine("Three captures read one live file and verified one cached blob.");
+            var time=File.GetLastWriteTimeUtc(path);File.WriteAllText(path,"modified");File.SetLastWriteTimeUtc(path,time);
+            var changed=store.Capture(saves,cycle);Equal(2,cycle.SourceReads);
+            var blob=store.PathFor(BlobReference.Parse(changed["slot"]).Hash);
+            store.Capture(saves,cycle);
+            time=File.GetLastWriteTimeUtc(blob);File.WriteAllText(blob,"tampered");File.SetLastWriteTimeUtc(blob,time);
+            Throws(()=>store.Capture(saves,cycle));
+        });
         Test("missing blobs cannot modify existing saves",()=>{var store=new BlobStore(Dir());var saves=Dir();File.WriteAllText(Path.Combine(saves,"safe"),"keep");var data=new SortedDictionary<string,string>{{"a","blob:"+new string('a',64)+":4"}};Throws(()=>store.Restore(saves,data,Revision.ContentHashOf(store.Capture(saves))));Equal("keep",File.ReadAllText(Path.Combine(saves,"safe")));});
         Test("same-length corruption fails SHA-256 before swapping folders",()=>{var store=new BlobStore(Dir());var saves=Dir();File.WriteAllText(Path.Combine(saves,"progress"),"original");var data=store.Capture(saves);var reference=BlobReference.Parse(data["progress"]);File.WriteAllBytes(store.PathFor(reference.Hash),Encoding.UTF8.GetBytes("tampered"));var target=Dir();File.WriteAllText(Path.Combine(target,"safe"),"keep");Throws(()=>store.Restore(target,data,Revision.ContentHashOf(store.Capture(target))));Equal("keep",File.ReadAllText(Path.Combine(target,"safe")));});
         Test("legacy inline snapshots migrate with common-version ancestry intact",()=>{var store=new BlobStore(Dir());var vault=new Vault(Dir());var old=new Revision{Game=game,Kind="save",Device=aId,Data=new SortedDictionary<string,string>{{"progress",Convert.ToBase64String(Encoding.UTF8.GetBytes("legacy"))}}};vault.Add(old);vault.State.Links[game]=new SaveLink{Save=new Checkpoint{Revision=old.Hash(),Content=old.ContentHash()}};vault.Save();vault.UpgradeLegacySaves(store,aId);var head=vault.Heads(game,"save").Single();Equal(2,head.Version);Equal(old.Hash(),head.Parents.Single());Equal(head.ContentHash(),vault.State.Links[game].Save.Content);Equal("legacy",Encoding.UTF8.GetString(store.ReadSmall(head.Data["progress"])));});

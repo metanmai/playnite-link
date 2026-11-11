@@ -76,7 +76,7 @@ namespace PlaytimeRclone
             setupStatus=syncing!=0?"Waiting for the current sync, then checking add-ons…":"Checking installed add-ons and your cloud…";
             if(setupStatusText!=null)setupStatusText.Text=setupStatus;
             if(setupCheckButton!=null){setupCheckButton.IsEnabled=false;setupCheckButton.Content="Checking…";}
-            try{nextSetupCapture=DateTime.MinValue;await SyncPersonalAsync(true,null);if(setupStatus.StartsWith("Checking")||setupStatus.StartsWith("Waiting for the current"))setupStatus="Add-on check could not finish. "+status;}
+            try{nextSetupCapture=DateTime.MinValue;await SyncPersonalAsync(true,null,true);if(setupStatus.StartsWith("Checking")||setupStatus.StartsWith("Waiting for the current"))setupStatus="Add-on check could not finish. "+status;}
             catch(Exception ex){setupStatus="Could not check add-ons: "+ex.Message;logger.Error(ex,"Manual add-on check failed.");}
             finally{setupChecking=false;RebuildSetupPage();}
         }
@@ -141,8 +141,14 @@ namespace PlaytimeRclone
             {
                 await Task.Run(async()=>{
                     await syncGate.WaitAsync();InterlockedSync(1);
-                    try{if(!setup.Options.Enabled)throw new InvalidOperationException("Enable add-on sync first.");var transport=SetupBlobTransport();blobs.Fetch=names=>transport.PullFiles(blobs.DirectoryPath,names);setup.Stage(selected,repository.Snapshot().Device);}
-                    finally{InterlockedSync(0);syncGate.Release();}
+                    try
+                    {
+                        if(!setup.Options.Enabled)throw new InvalidOperationException("Enable add-on sync first.");
+                        // Setup can also stage already cached packages while offline.
+                        blobs.Fetch=names=>{CheckActiveGameVault(config,()=>closing||TransferStopped);SetupBlobTransport().PullFiles(blobs.DirectoryPath,names);};
+                        setup.Stage(selected,repository.Snapshot().Device);
+                    }
+                    finally{blobs.Fetch=null;InterlockedSync(0);syncGate.Release();}
                 });
                 var script=Path.Combine(Path.GetDirectoryName(typeof(PlaytimePlugin).Assembly.Location),"SetupApply.ps1");if(!File.Exists(script))throw new FileNotFoundException("The setup helper is missing. Reinstall Playnite Link.");
                 var process=Process.GetCurrentProcess();var exe=process.MainModule.FileName;

@@ -118,7 +118,7 @@ namespace PlaytimeRclone
             var receiptPath=Path.Combine(MigrationDirectory,id+".json");
             var unavailable=new List<string>();var candidates=LegacyBackupCandidates(id,backups,unavailable);var catalogHash=LegacyCatalogHash(candidates,unavailable);
             if(File.Exists(receiptPath)){var previous=JsonSafety.Deserialize<SaveMigrationReceipt>(File.ReadAllText(receiptPath));if(previous.SourceConfigHash==sourceHash&&previous.CatalogHash==catalogHash&&previous.Key==key){try{SaveMigrationFiles.Verify(previous);var persisted=new SaveManager.Services.BackupService(Path.Combine(Root,"save-manager"),logger,PlayniteApi,()=>false);if(previous.ImportedBackups.All(imported=>persisted.GetBackups(game.Id).Any(b=>b.Id==imported)))return;backupService=null;}catch(IOException){/* Revalidate originals rather than trusting an old receipt. */}}}
-            PlanRecoveryBeforeEdit(game,key);var old=Link(key);incoming.Save=old.Save;incoming.Preferences=old.Preferences;
+            PlanRecoveryBeforeEdit(game,key);var old=Link(key);incoming.Save=old.Save;incoming.Preferences=old.Preferences;incoming.LinkManagesSaves=old.LinkManagesSaves;
             var receipt=new SaveMigrationReceipt{ConfigId=id,Game=game.Id.ToString(),Key=key,SourceConfigHash=sourceHash,CatalogHash=catalogHash,Unavailable=unavailable};
             var archive=Path.Combine(MigrationDirectory,"originals",sourceHash);Directory.CreateDirectory(archive);
             receipt.Files.Add(SaveMigrationFiles.Copy(sourceConfig,Path.Combine(archive,"config.json")));
@@ -273,7 +273,7 @@ namespace PlaytimeRclone
                             var incoming=ParseSaveConfiguration(item.ToString());if(manifest["LegacySettings"] is JObject)SaveManagerOptions.ApplyLegacy(incoming,(JObject)manifest["LegacySettings"],(string)item["ConfigId"]??"");PreviewSaveConfiguration(game,map.Key,incoming);
                             // Cancellation leaves the original configuration reference in place.
                             if(!Object.ReferenceEquals(Link(map.Key),incoming))return;
-                            import.IsEnabled=false;await SaveOperation(game,()=>{foreach(var source in sources){var backup=ImportSaveBackup(game,map.Key,source.Key);ApplyBackupMetadata(map.Key,backup,source.Value);}});feedback.Text="Configuration and backups imported. Live saves were not overwritten.";QueueSync();
+                            import.IsEnabled=false;await SaveOperation(game,()=>{foreach(var source in sources){var backup=ImportSaveBackup(game,map.Key,source.Key);ApplyBackupMetadata(map.Key,backup,source.Value);}});feedback.Text="Configuration and backups imported. Live saves were not overwritten.";QueueGameSync(game.Id);
                         }catch(Exception ex){feedback.Text=ex.Message;}finally{import.IsEnabled=true;}
                     };
                 }

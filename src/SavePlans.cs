@@ -137,18 +137,18 @@ namespace PlaytimeRclone
             {try{if(Protected(pair.Key))result.Add(pair.Key,pair.Value);}catch(IOException){/* An old, explicitly removed source is not published again. */}}
             return result;
         }
-        public SortedDictionary<string,string> Capture(bool includeProtected=false)
+        public SortedDictionary<string,string> Capture(bool includeProtected=false,SaveCaptureCache cycle=null)
         {
-            Recover();return CaptureRaw(includeProtected);
+            Recover();return CaptureRaw(includeProtected,cycle);
         }
-        SortedDictionary<string,string> CaptureRaw(bool includeProtected)
+        SortedDictionary<string,string> CaptureRaw(bool includeProtected,SaveCaptureCache cycle=null)
         {
             var result=new SortedDictionary<string,string>(StringComparer.Ordinal);
             foreach(var source in Sources)
             {
                 if(source.IsDirectory)
                 {
-                    foreach(var pair in blobs.Capture(source.Path))
+                    foreach(var pair in blobs.Capture(source.Path,cycle))
                     {
                         if(source.Prefix==""&&pair.Key.StartsWith(Mounts,StringComparison.OrdinalIgnoreCase))throw new IOException("The save folder uses Link's reserved __pl_roots directory name.");
                         var key=source.Prefix+pair.Key;if(includeProtected||!Protected(key))result.Add(key,pair.Value);
@@ -156,7 +156,7 @@ namespace PlaytimeRclone
                 }
                 else if(File.Exists(source.Path))
                 {
-                    var key=source.Prefix+"content";if(includeProtected||!Protected(key))using(var input=new FileStream(source.Path,FileMode.Open,FileAccess.Read,FileShare.Read))result.Add(key,blobs.Put(input).ToString());
+                    var key=source.Prefix+"content";if(includeProtected||!Protected(key))result.Add(key,blobs.PutFile(source.Path,cycle).ToString());
                 }
             }
             AddLayout(result);SaveFiles.Validate(result);return result;
@@ -176,61 +176,114 @@ namespace PlaytimeRclone
             if(state==null||state.Version!=1||state.Sources==null||state.Before==null||state.Absent==null||JsonConvert.SerializeObject(state.Sources)!=JsonConvert.SerializeObject(Sources))throw new IOException("An interrupted save replacement needs its original path configuration. Restore that configuration before launching.");
             SaveFiles.Validate(state.Before);foreach(var pair in state.Before)if(!IsLayout(pair.Key))Target(pair.Key);blobs.Ensure(state.Before);
             var cancellation=blobs.CancelRequested;
-            try{blobs.CancelRequested=null;Apply(state.Before,null);}finally{blobs.CancelRequested=cancellation;}
+            try{blobs.CancelRequested=null;Apply(state.Before);}finally{blobs.CancelRequested=cancellation;}
             foreach(var source in Sources.Where(s=>state.Absent.Contains(s.Id)))
             {if(source.IsDirectory&&Directory.Exists(source.Path)&&!Directory.EnumerateFileSystemEntries(source.Path).Any())Directory.Delete(source.Path);}
             File.Delete(journal);
         }
         public string Restore(SortedDictionary<string,string> data,string expected,Action beforeReplace=null)
         {
-            Recover();var incoming=Filter(data);blobs.Ensure(incoming);foreach(var value in incoming.Values)blobs.CopyVerified(value,Stream.Null);
-            if(Revision.ContentHashOf(CaptureRaw(false))!=expected)throw new IOException("Local saves changed; restore deferred.");
-            var before=CaptureRaw(true);var merged=new SortedDictionary<string,string>(incoming,StringComparer.Ordinal);
+            Recover();
+            var incoming=Filter(data);blobs.Ensure(incoming);
+            var cycle=new SaveCaptureCache();
+            var before=CaptureRaw(true,cycle);
+            if(Revision.ContentHashOf(Filter(before))!=expected)throw new IOException("Local saves changed; restore deferred.");
+            var merged=new SortedDictionary<string,string>(incoming,StringComparer.Ordinal);
             foreach(var pair in before)if(Protected(pair.Key))merged[pair.Key]=pair.Value;
-            if(beforeReplace!=null)beforeReplace();
-            if(Revision.ContentHashOf(CaptureRaw(true))!=Revision.ContentHashOf(before))throw new IOException("Local saves changed while restore was preparing.");
-            // Preserve the existing single-folder crash protocol and backups.
-            if(Sources.Count==1&&Sources[0].IsDirectory&&Sources[0].Prefix=="")return blobs.Restore(Sources[0].Path,merged,Revision.ContentHashOf(before));
-            var receipt=new Recovery{Sources=Sources,Before=before,Absent=Sources.Where(s=>!File.Exists(s.Path)&&!Directory.Exists(s.Path)).Select(s=>s.Id).ToList()};
-            Atomic.Write(journal,JsonConvert.SerializeObject(receipt));
-            try{Apply(merged,before);File.Delete(journal);}catch{try{Recover();}catch{/* Durable rollback record remains; next launch fails closed. */}throw;}
-            return journal+".bak";
+            var stages=new List<PreparedSource>();
+            try
+            {
+                foreach(var source in Sources)stages.Add(Prepare(source,merged));
+                if(beforeReplace!=null)beforeReplace();
+                if(!HasLayout)return stages[0].Commit(before,cycle);
+                if(Revision.ContentHashOf(CaptureRaw(true,cycle))!=Revision.ContentHashOf(before))
+                    throw new IOException("Local saves changed while restore was preparing.");
+                var receipt=new Recovery{Sources=Sources,Before=before,Absent=Sources.Where(s=>!File.Exists(s.Path)&&!Directory.Exists(s.Path)).Select(s=>s.Id).ToList()};
+                Atomic.Write(journal,JsonConvert.SerializeObject(receipt));
+                try
+                {
+                    foreach(var stage in stages)stage.Commit(Part(stage.Source,before),cycle);
+                    File.Delete(journal);
+                }
+                catch
+                {
+                    try{Recover();}catch{/* Durable rollback record remains; next launch fails closed. */}
+                    throw;
+                }
+                return journal+".bak";
+            }
+            finally{foreach(var stage in stages)stage.Dispose();}
         }
-        void Apply(SortedDictionary<string,string> data,SortedDictionary<string,string> expected)
+        private SortedDictionary<string,string> Part(ResolvedSaveSource source,SortedDictionary<string,string> data)
+        {
+            var part=new SortedDictionary<string,string>(StringComparer.Ordinal);
+            foreach(var pair in data)
+            {
+                if(IsLayout(pair.Key))continue;
+                var target=Target(pair.Key);
+                if(source.IsDirectory&&SavePaths.Contains(source.Path,target))part.Add(target.Substring(source.Path.Length+1).Replace('\\','/'),pair.Value);
+                else if(!source.IsDirectory&&pair.Key==source.Prefix+"content")part.Add("content",pair.Value);
+            }
+            return part;
+        }
+        private sealed class PreparedSource : IDisposable
+        {
+            public ResolvedSaveSource Source;
+            public BlobStore Blobs;
+            public BlobStore.StagedFolder Folder;
+            public string StagedFile;
+            public string Commit(SortedDictionary<string,string> before,SaveCaptureCache cycle)
+            {
+                var path=Source.Path;var expected=Revision.ContentHashOf(before);
+                if(Folder!=null)return Folder.Commit(expected,cycle);
+                SaveFiles.CheckAncestors(path);
+                var current=new SortedDictionary<string,string>(StringComparer.Ordinal);
+                if(File.Exists(path))current.Add("content",Blobs.PutFile(path,cycle).ToString());
+                if(Revision.ContentHashOf(current)!=expected)throw new IOException("A save source changed during restore. The transaction was rolled back.");
+                var backup=path+".pl-backup-"+Guid.NewGuid().ToString("N");
+                if(StagedFile!=null)
+                {
+                    if(File.Exists(path))File.Replace(StagedFile,path,backup);
+                    else File.Move(StagedFile,path);
+                }
+                else if(File.Exists(path))File.Move(path,backup);
+                return null;
+            }
+            public void Dispose()
+            {
+                if(Folder!=null)Folder.Dispose();
+                if(StagedFile!=null&&File.Exists(StagedFile))File.Delete(StagedFile);
+            }
+        }
+        private PreparedSource Prepare(ResolvedSaveSource source,SortedDictionary<string,string> data)
+        {
+            SaveFiles.CheckAncestors(source.Path);
+            var part=Part(source,data);
+            var result=new PreparedSource{Source=source,Blobs=blobs};
+            try
+            {
+                if(source.IsDirectory)result.Folder=blobs.PrepareRestore(source.Path,part);
+                else if(part.Count>0)
+                {
+                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(source.Path));
+                    result.StagedFile=source.Path+".pl-stage-"+Guid.NewGuid().ToString("N");
+                    using(var output=new FileStream(result.StagedFile,FileMode.CreateNew,FileAccess.Write,FileShare.None))
+                    {blobs.CopyVerified(part["content"],output);output.Flush(true);}
+                }
+                return result;
+            }
+            catch{result.Dispose();throw;}
+        }
+        private void Apply(SortedDictionary<string,string> data)
         {
             foreach(var source in Sources)
             {
-                SaveFiles.CheckAncestors(source.Path);
-                var part=new SortedDictionary<string,string>(StringComparer.Ordinal);
-                foreach(var pair in data)
+                using(var staged=Prepare(source,data))
                 {
-                    if(IsLayout(pair.Key))continue;
-                    var target=Target(pair.Key);
-                    if(source.IsDirectory&&SavePaths.Contains(source.Path,target))part.Add(target.Substring(source.Path.Length+1).Replace('\\','/'),pair.Value);
+                    var current=source.IsDirectory?blobs.Capture(source.Path):new SortedDictionary<string,string>(StringComparer.Ordinal);
+                    if(!source.IsDirectory&&File.Exists(source.Path))current.Add("content",blobs.PutFile(source.Path,null).ToString());
+                    staged.Commit(current,null);
                 }
-                var current=source.IsDirectory?blobs.Capture(source.Path):new SortedDictionary<string,string>(StringComparer.Ordinal);
-                if(!source.IsDirectory&&File.Exists(source.Path))using(var input=File.OpenRead(source.Path))current.Add("content",blobs.Put(input).ToString());
-                if(expected!=null)
-                {
-                    var prior=new SortedDictionary<string,string>(StringComparer.Ordinal);
-                    foreach(var pair in expected)
-                    {
-                        if(IsLayout(pair.Key))continue;
-                        var target=Target(pair.Key);
-                        if(source.IsDirectory&&SavePaths.Contains(source.Path,target))prior.Add(target.Substring(source.Path.Length+1).Replace('\\','/'),pair.Value);
-                        else if(!source.IsDirectory&&pair.Key==source.Prefix+"content")prior.Add("content",pair.Value);
-                    }
-                    if(Revision.ContentHashOf(current)!=Revision.ContentHashOf(prior))throw new IOException("A save source changed during restore. The transaction was rolled back.");
-                }
-                if(source.IsDirectory){blobs.Restore(source.Path,part,Revision.ContentHashOf(current));continue;}
-                string value;
-                if(data.TryGetValue(source.Prefix+"content",out value))
-                {
-                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(source.Path));var temp=source.Path+".pl-stage-"+Guid.NewGuid().ToString("N");
-                    try{using(var output=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None)){blobs.CopyVerified(value,output);output.Flush(true);}SaveFiles.CheckAncestors(source.Path);if(File.Exists(source.Path))File.Replace(temp,source.Path,source.Path+".pl-backup-"+Guid.NewGuid().ToString("N"));else File.Move(temp,source.Path);}
-                    finally{if(File.Exists(temp))File.Delete(temp);}
-                }
-                else if(File.Exists(source.Path))File.Move(source.Path,source.Path+".pl-backup-"+Guid.NewGuid().ToString("N"));
             }
         }
     }

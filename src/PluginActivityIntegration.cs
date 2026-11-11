@@ -110,12 +110,12 @@ namespace PlaytimeRclone
                 return (bool)await Await(PluginActivityStore.Call(Api,"ApiSubmitData",Game,edit));
             }
         }
-        private async Task SyncOnlineHltb()
+        private async Task SyncOnlineHltb(KeyValuePair<string,Mapping>[] mappings)
         {
             if(onboarding==null||!onboarding.OnlineHltb||!devicePreferences.SyncPlaytime||DateTime.UtcNow<hltbRetryAfter)return;
             try
             {
-                await SyncNativeHltb();
+                await SyncNativeHltb(mappings);
             }
             catch(Exception ex){hltbRetryAfter=DateTime.UtcNow.AddMinutes(2);activityStatus="HLTB progress is queued: "+ex.Message;logger.Error(ex,"Online HLTB progress deferred.");}
         }
@@ -141,11 +141,13 @@ namespace PlaytimeRclone
             var plugin=PlayniteApi.Addons.Plugins.FirstOrDefault(p=>p.Id==new Guid("afbb1a0d-04a1-4d0c-9afa-c6e42ca855b4"));
             return plugin==null?null:new PluginActivityStore(plugin,id=>PlayniteApi.Database.Games.Get(id));
         }
-        private async System.Threading.Tasks.Task CaptureActivityHistoryAsync()
+        private async System.Threading.Tasks.Task CaptureActivityHistoryAsync(KeyValuePair<string,Mapping>[] mappings)
         {
             var store=UI(()=>ActivityStore());if(store==null)return;
-            UI(()=>{if(activityBridge==null)activityBridge=new ActivityBridge(Root);activityReview.Clear();});
-            var mappings=UI(()=>repository.Snapshot().Mappings.ToArray());
+            UI(()=>{
+                if(activityBridge==null)activityBridge=new ActivityBridge(Root);
+                foreach(var mapping in mappings)activityReview.Remove(new Guid(mapping.Key));
+            });
             for(var i=0;i<mappings.Length;i+=4)
             {
                 CheckTransfer();ReportStatus("Reading existing GameActivity sessions without adding duplicate plays.",SyncDisplayState.Working,"Reading session history",Math.Min(i+4,mappings.Length),mappings.Length);
@@ -170,10 +172,10 @@ namespace PlaytimeRclone
         }
         private void SetActivityCounters(Game game)
         {
-            var snapshot=repository.SnapshotGame(game.Id.ToString());var mapping=snapshot.Mappings[game.Id.ToString()];
-            game.PlayCount=new Ledger(snapshot.Entries).SessionCount(mapping.Key);
-            var latest=snapshot.Entries.Where(e=>e.Game==mapping.Key&&e.Kind!="baseline").Select(e=>DateTimeOffset.Parse(e.StartedUtc).UtcDateTime).OrderByDescending(d=>d).FirstOrDefault();
-            if(latest!=default(DateTime)&&(!game.LastActivity.HasValue||game.LastActivity.Value.ToUniversalTime()<latest))game.LastActivity=latest;
+            var projection=repository.ReadProjection(game.Id.ToString());
+            game.PlayCount=projection.Count;
+            var latest=projection.LastActivityUtc;
+            if(latest.HasValue&&(!game.LastActivity.HasValue||game.LastActivity.Value.ToUniversalTime()<latest.Value))game.LastActivity=latest;
         }
         private void RefreshActivityDisplays(Game game)
         {
@@ -183,9 +185,9 @@ namespace PlaytimeRclone
             var hltb=PlayniteApi.Addons.Plugins.FirstOrDefault(p=>p.GetType().FullName=="HowLongToBeat.HowLongToBeat");
             if(hltb!=null){var db=PluginActivityStore.Member(hltb,"PluginDatabase");var context=PluginActivityStore.Member(db,"GameContext") as Game;if(context!=null&&context.Id==game.Id)PluginActivityStore.Call(db,"SetThemesResources",game);}
         }
-        private async void RetryActivityAfterStop()
+        private async void RetryActivityAfterStop(Guid game)
         {
-            try{await Task.Delay(2500);while(!closing&&IsSyncRunning)await Task.Delay(250);if(!closing&&activityStatus.StartsWith("Waiting for GameActivity",StringComparison.Ordinal))QueuePersonalSync();}catch(Exception ex){logger.Error(ex,"Session integration retry deferred.");}
+            try{await Task.Delay(2500);while(!closing&&IsSyncRunning)await Task.Delay(250);if(!closing&&activityStatus.StartsWith("Waiting for GameActivity",StringComparison.Ordinal))QueueGameSync(game);}catch(Exception ex){logger.Error(ex,"Session integration retry deferred.");}
         }
     }
 }

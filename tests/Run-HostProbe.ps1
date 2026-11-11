@@ -7,9 +7,12 @@ param(
     [switch]$OnboardingProbe,
     [switch]$DevicesProbe,
     [switch]$SaveManagerProbe,
+    [switch]$SyncSettingsProbe,
     [switch]$AchievementPeer,
     [string]$AchievementPhase='author',
     [string]$SharedAchievementCloud='',
+    [string]$AchievementAddonPackage='',
+    [switch]$SkipEvidenceCopy,
     [string]$BuildDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -27,10 +30,14 @@ New-Item -ItemType Directory -Force $appPath,$profilePath,$subjectPath,$probePat
 & robocopy $PlaynitePath $appPath /E /XD Extensions 'User Data' /XF '*.pdb' '*.log' 'unins*' /NFL /NDL /NJH /NJS /NP
 if ($LASTEXITCODE -ge 8) { throw 'Failed to copy installed Playnite to isolated test lab' }
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll'),(Join-Path $buildDir 'extension.yaml') $subjectPath
-if(Test-Path (Join-Path $buildDir 'StartPage.SDK.dll')){Copy-Item (Join-Path $buildDir 'StartPage.SDK.dll') $subjectPath}
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll'),(Join-Path $projectRoot 'src/RetireSaveManager.ps1') $subjectPath
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $subjectPath
-if(Test-Path (Join-Path $buildDir 'AchievementEngine')){Copy-Item (Join-Path $buildDir 'AchievementEngine') $subjectPath -Recurse}
+if ($AchievementAddonPackage) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $addonPath = Join-Path $profilePath 'Extensions/PlayniteAchievements'
+    [IO.Compression.ZipFile]::ExtractToDirectory((Get-Item -LiteralPath $AchievementAddonPackage).FullName,$addonPath)
+    if (!(Test-Path -LiteralPath (Join-Path $addonPath 'extension.yaml'))) { throw 'The standalone add-on manifest is missing.' }
+}
 if(Test-Path (Join-Path $buildDir 'SetupApply.ps1')){Copy-Item (Join-Path $buildDir 'SetupApply.ps1') $subjectPath}
 $commonPath = Join-Path $appPath 'Common.config'
 $pipeName = 'net.pipe://localhost/PlaytimeProbe' + [Guid]::NewGuid().ToString('N')
@@ -47,11 +54,11 @@ Type: GenericPlugin
 '@ | Set-Content (Join-Path $probePath 'extension.yaml')
 $compilerPath = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
 $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
-$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll","/r:$buildDir/StartPage.SDK.dll","/r:$buildDir/SaveManager.Core.dll",'/r:System.IO.Compression.dll','/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
+$references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll","/r:$buildDir/SaveManager.Core.dll",'/r:System.IO.Compression.dll','/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll') $probePath
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll') $probePath
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $probePath
-$probeSource=if($AchievementPeer){'AchievementPeerProbe.cs'}elseif($SaveManagerProbe){'SaveManagerHostProbe.cs'}elseif($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}elseif($DevicesProbe){'DevicesHostProbe.cs'}else{'PersonalHostProbe.cs'}
+$probeSource=if($AchievementPeer){'AchievementPeerProbe.cs'}elseif($SyncSettingsProbe){'SyncSettingsHostProbe.cs'}elseif($SaveManagerProbe){'SaveManagerHostProbe.cs'}elseif($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}elseif($DevicesProbe){'DevicesHostProbe.cs'}else{'PersonalHostProbe.cs'}
 & $compilerPath /nologo /target:library "/out:$probePath/HostProbe.dll" @references (Join-Path $PSScriptRoot $probeSource)
 if ($LASTEXITCODE -ne 0) { throw 'Host probe compile failed' }
 & $compilerPath /nologo /target:winexe "/out:$profilePath/FixtureGame.exe" (Join-Path $PSScriptRoot 'FixtureGame.cs')
@@ -83,6 +90,10 @@ if($AchievementPeer){
  $AchievementPhase | Set-Content (Join-Path $profilePath 'achievement-peer-phase.txt')
 }
 @{ RcloneExe=$rcloneExe;ConfigFile=$rcloneConfig;RemoteFolder='vault:personal' } | ConvertTo-Json | Set-Content (Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767/rclone-settings.json')
+if($SyncSettingsProbe){
+ foreach($area in @('receipts','backups','achievements','achievement-catalogs','achievement-customizations')){New-Item -ItemType Directory -Force (Join-Path $profilePath ('Cloud/personal/playnite-link-v1/'+$area+'/objects'))|Out-Null}
+ @{SetupComplete=$true;SyncPaused=$true} | ConvertTo-Json | Set-Content (Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767/onboarding.json')
+}
 if($OnboardingProbe){
  $extensionData=Join-Path $profilePath 'ExtensionsData/8ca18482-3ebe-4bf7-b229-a259b2094767'
  @{AutomaticGames=$true;SetupComplete=$false;SetupStep=0;SyncPaused=$false} | ConvertTo-Json | Set-Content (Join-Path $extensionData 'onboarding.json')
@@ -109,16 +120,18 @@ if($OnboardingProbe -and (Get-Content $resultPath -Raw|ConvertFrom-Json).passed)
  while(!(Test-Path $restartResult)-and [DateTime]::UtcNow -lt $restartDeadline){Start-Sleep -Milliseconds 300}
  Start-Process $exePath -ArgumentList '--shutdown' -WindowStyle Hidden | Out-Null
  if(!(Test-Path $restartResult)){throw 'Restart verification did not finish'}
- Copy-Item $restartResult (Join-Path $projectRoot ('docs/evidence/vault-switch-'+$Mode.ToLowerInvariant()+'-restart.json')) -Force
+ if (!$SkipEvidenceCopy) { Copy-Item $restartResult (Join-Path $projectRoot ('docs/evidence/vault-switch-'+$Mode.ToLowerInvariant()+'-restart.json')) -Force }
  Write-Output (Get-Content $restartResult -Raw)
  if(!(Get-Content $restartResult -Raw|ConvertFrom-Json).passed){throw 'Restart verification failed'}
 }
-$evidencePath = Join-Path $projectRoot 'docs/evidence'
-New-Item -ItemType Directory -Force $evidencePath | Out-Null
-$prefix=if($SaveManagerProbe){'save-manager-'+$Mode.ToLowerInvariant()}elseif($OnboardingProbe){'onboarding-'+$Mode.ToLowerInvariant()}elseif($LockProbe){'lock-'+$Mode.ToLowerInvariant()}elseif($DevicesProbe){'devices-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}
-Copy-Item $resultPath (Join-Path $evidencePath ($prefix + '-host.json')) -Force
-Get-ChildItem $profilePath -Filter '*.png' | ForEach-Object { Copy-Item $_.FullName (Join-Path $evidencePath ($prefix + '-' + $_.Name)) -Force }
-Copy-Item (Join-Path $profilePath 'extensions.log') (Join-Path $evidencePath ($prefix + '-extensions.log')) -Force
+if (!$SkipEvidenceCopy) {
+    $evidencePath = Join-Path $projectRoot 'docs/evidence'
+    New-Item -ItemType Directory -Force $evidencePath | Out-Null
+    $prefix=if($SaveManagerProbe){'save-manager-'+$Mode.ToLowerInvariant()}elseif($OnboardingProbe){'onboarding-'+$Mode.ToLowerInvariant()}elseif($LockProbe){'lock-'+$Mode.ToLowerInvariant()}elseif($DevicesProbe){'devices-'+$Mode.ToLowerInvariant()}else{$Mode.ToLowerInvariant()}
+    Copy-Item $resultPath (Join-Path $evidencePath ($prefix + '-host.json')) -Force
+    Get-ChildItem $profilePath -Filter '*.png' | ForEach-Object { Copy-Item $_.FullName (Join-Path $evidencePath ($prefix + '-' + $_.Name)) -Force }
+    Copy-Item (Join-Path $profilePath 'extensions.log') (Join-Path $evidencePath ($prefix + '-extensions.log')) -Force
+}
 $result = Get-Content $resultPath -Raw | ConvertFrom-Json
 Write-Output (Get-Content $resultPath -Raw)
 Write-Output "Isolated lab retained at $labRoot"
