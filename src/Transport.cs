@@ -49,8 +49,11 @@ namespace PlaytimeRclone
             }
             return result.Append('\\', slashes * 2).Append('"').ToString();
         }
-        private void Copy(string source, string destination, bool upload,string fileList=null,string[] metadata=null)
+        // Uploads run at a limited request rate, so a large batch needs longer than a small one.
+        public static int UploadLimit(int configured,int files){return Math.Max(configured,Math.Min(86400,files));}
+        private void Copy(string source, string destination, bool upload,string fileList=null,string[] metadata=null,int files=0)
         {
+            var limit=upload?UploadLimit(limitSeconds,files):limitSeconds;
             if(cancelled!=null&&cancelled())throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");
             var metadataDownload=!upload&&metadata!=null;
             if(metadataDownload)MetadataCache.Validate(destination);
@@ -76,7 +79,7 @@ namespace PlaytimeRclone
                 {
                     if(cancelled!=null&&cancelled()){stopped=true;break;}
                     if(metadataDownload){if(watch.Elapsed.TotalSeconds>=nextProgress){cached=MetadataCache.Count(destination);if(progress!=null)progress(new MetadataTransferProgress{Cached=cached,Downloaded=Math.Max(0,cached-initial),ElapsedSeconds=watch.Elapsed.TotalSeconds});interrupted=guard.Observe(watch.Elapsed.TotalSeconds,cached);nextProgress=watch.Elapsed.TotalSeconds+2;}if(interrupted!=null)break;}
-                    else if(watch.Elapsed.TotalSeconds>limitSeconds){interrupted="The cloud transfer stopped responding. Local changes remain queued.";break;}
+                    else if(watch.Elapsed.TotalSeconds>limit){interrupted="The cloud transfer stopped responding. Local changes remain queued.";break;}
                 }
                 if(stopped||interrupted!=null){process.Kill();process.WaitForExit();System.Threading.Tasks.Task.WaitAll(stdout,stderr);if(FailureDiagnostic!=null)FailureDiagnostic(stderr.Result);if(stopped)throw new OperationCanceledException("Cloud transfer cancelled; local changes remain queued.");throw new CloudTransferException(interrupted);}
                 System.Threading.Tasks.Task.WaitAll(stdout, stderr);
@@ -95,7 +98,7 @@ namespace PlaytimeRclone
         public void Pull(string destination) { Copy(root, destination, false); }
         public void PullMetadata(string destination)
         {Copy(root,destination,false,null,MetadataCache.Areas);if(progress!=null)progress(new MetadataTransferProgress{Cached=MetadataCache.Count(destination)}); }
-        public void Push(string source) { Copy(source, root, true); }
+        public void Push(string source) { Copy(source, root, true, null, null, Directory.GetFiles(source, pattern).Length); }
         public void PullFiles(string destination,IEnumerable<string> names)
         {
             var list=names.Distinct().ToList();if(list.Count==0)return;
@@ -117,7 +120,7 @@ namespace PlaytimeRclone
                     store.CopyVerified(new BlobReference{Hash=Path.GetFileNameWithoutExtension(name),Length=new FileInfo(Path.Combine(source,name)).Length}.ToString(),Stream.Null);
             }
             var path=Path.Combine(source,Guid.NewGuid().ToString("N")+".files.tmp");
-            try{File.WriteAllLines(path,list,new UTF8Encoding(false));Copy(source,root,true,path);}finally{if(File.Exists(path))File.Delete(path);}
+            try{File.WriteAllLines(path,list,new UTF8Encoding(false));Copy(source,root,true,path,null,list.Count);}finally{if(File.Exists(path))File.Delete(path);}
         }
     }
     public sealed class SyncEngine
