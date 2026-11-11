@@ -50,6 +50,7 @@ $wpfRoot = "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"
 $references = @("/r:$appPath/Playnite.SDK.dll","/r:$appPath/Newtonsoft.Json.dll","/r:$buildDir/PlayniteLink.dll","/r:$buildDir/StartPage.SDK.dll","/r:$buildDir/SaveManager.Core.dll",'/r:System.IO.Compression.dll','/r:System.Core.dll','/r:System.Xaml.dll',"/r:$wpfRoot/WindowsBase.dll","/r:$wpfRoot/PresentationFramework.dll","/r:$wpfRoot/PresentationCore.dll")
 Copy-Item (Join-Path $buildDir 'PlayniteLink.dll') $probePath
 Copy-Item (Join-Path $buildDir 'SaveManager.Core.dll') $probePath
+Copy-Item (Join-Path $buildDir 'StartPage.SDK.dll') $probePath
 Copy-Item (Join-Path $buildDir 'Microsoft.Toolkit.Uwp.Notifications.dll') $probePath
 $probeSource=if($AchievementPeer){'AchievementPeerProbe.cs'}elseif($SaveManagerProbe){'SaveManagerHostProbe.cs'}elseif($OnboardingProbe){'OnboardingHostProbe.cs'}elseif($LockProbe){'LockHostProbe.cs'}elseif($DevicesProbe){'DevicesHostProbe.cs'}else{'PersonalHostProbe.cs'}
 & $compilerPath /nologo /target:library "/out:$probePath/HostProbe.dll" @references (Join-Path $PSScriptRoot $probeSource)
