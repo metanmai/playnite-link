@@ -97,7 +97,11 @@ internal static class Tests
         Test("remapping an enrolled game blocked", () => { using(var r=Enrolled()){Throws(()=>r.Enroll("game","manual:other",100,100));} });
         Test("start-stop exact elapsed and duplicate stop ignored", () => { using(var r=Enrolled()){r.Start("game");Equal(true,r.Stop("game",30));Equal(false,r.Stop("game",30));Equal(130UL,Total(r));} });
         Test("unenrolled games ignored", () => { using(var r=Enrolled()){Equal(false,r.Start("unknown"));Equal(false,r.Stop("unknown",30));Equal(100UL,Total(r));} });
-        Test("unfinished session prevents accidental new session", () => { using(var r=Enrolled()){r.Start("game");Throws(()=>r.Start("game"));Equal(100UL,Total(r));} });
+        Test("session follows playtime lowered by another add-on", () => { using(var r=Enrolled()){r.Start("game",100UL);Equal(true,r.Stop("game",30,110UL));Equal(110UL,Total(r));ulong displayed=0;r.AcceptProjection("game",110UL,v=>displayed=v);Equal(0UL,displayed);} });
+        Test("session is not raised above elapsed time by observed playtime", () => { using(var r=Enrolled()){r.Start("game",100UL);Equal(true,r.Stop("game",30,500UL));Equal(130UL,Total(r));} });
+        Test("session removed entirely by another add-on counts zero seconds", () => { using(var r=Enrolled()){r.Start("game",100UL);Equal(true,r.Stop("game",30,100UL));Equal(100UL,Total(r));} });
+        Test("session started by an older version keeps elapsed time", () => { using(var r=Enrolled()){r.Start("game");Equal(true,r.Stop("game",30,110UL));Equal(130UL,Total(r));} });
+        Test("unfinished session prevents accidental new session",() => { using(var r=Enrolled()){r.Start("game");Throws(()=>r.Start("game"));Equal(100UL,Total(r));} });
         Test("simultaneous games keep distinct tokens", () => { using(var r=Enrolled()){r.Enroll("other","manual:other",0,0);r.Start("game");r.Start("other");r.Stop("other",70);r.Stop("game",5);Equal(105UL,Total(r));} });
         Test("restart retains offline sessions and device identity", () => {
             var d=NewDir();string device;using(var r=new Repository(d)){r.Enroll("game","manual:dispatch",100,100);r.Start("game");r.Stop("game",10);device=r.Snapshot().Device;}
