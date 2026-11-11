@@ -1,12 +1,9 @@
 AddonId: PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767
 Packages:
-  - Version: 0.7.0
+  - Version: 0.7.2
     RequiredApiVersion: 6.18.0
-    ReleaseDate: 2026-10-23
-    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.7.0/PlayniteLink_8ca18482-3ebe-4bf7-b229-a259b2094767_0_7_0.pext
+    ReleaseDate: 2026-11-11
+    PackageUrl: https://github.com/metanmai/playnite-link/releases/download/v0.7.2/PlayniteLink-0.7.2.pext
     Changelog:
-      - Add Playnite Link sidebar dashboard with live sync status and library controls.
-      - Build the original Playnite Achievements 4.1.1 engine into Link.
-      - Sync achievement catalogs, unlocks, progress, notes, goals and manual customizations.
-      - Validate Desktop, Fullscreen, independent profiles and real Google Drive transfer.
-      - Include source, licenses and explicit hardware/provider validation limits.
+      - Show live save status for games with confirmed cloud save history in compatible theme templates.
+      - Default Steam and Epic save management to their launchers.
